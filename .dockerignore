@@ -1,0 +1,7 @@
+vault/
+config/.env
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.DS_Store
+
