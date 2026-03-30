@@ -1,145 +1,219 @@
 # Obsidian Telegram Daily Capture
 
-Telegram bot + Obsidian Headless Sync running in a single Docker container (ARM64-ready for Raspberry Pi).
+Telegram bot + Obsidian Headless Sync in one Docker container (ARM64-ready, Raspberry Pi friendly).
 
-## Quick Start
+The bot receives voice notes, images, plain text messages, and documents (including PDF) from Telegram, appends entries to one daily Markdown note, and keeps your Obsidian vault continuously synced.
 
-1. Configure environment variables (strict mode: required values, no runtime fallbacks):
-   - `cp config/.env.example config/.env`
-   - edit `config/.env` and set `TELEGRAM_BOT_TOKEN`
-2. Start the service:
-   - `docker compose up -d --build`
-3. Run one-time interactive Obsidian setup:
-   - `docker compose exec obsidian-telegram bash`
-   - `setup.sh`
+Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https://github.com/giacomoleonzi/obsidian-telegram-daily-bot/tree/main)
 
-## Features
+## Table of Contents
 
-- Receives Telegram voice messages (`.ogg`).
-- Receives Telegram images (photos and image documents).
-- Stores audio and images in the vault media subfolder (default: `999 - File Bucket`, configurable via `BOT_MEDIA_SUBDIR`).
-- Writes and updates a single daily note in `000 - Daily` (or your custom `BOT_DAILY_SUBDIR`).
-- Transcribes audio locally with `whisper.cpp` (CPU-only, ARM64-friendly).
-- Generates a summary:
-  - local (default, lightweight)
-  - optional via Gemini API
-- Appends to one daily note (e.g. `2026-03-27.md`) with:
-  - audio/image embeds
-  - audio transcription
-  - audio summary
-- Runs `ob sync --continuous` in parallel to keep the vault synced.
-- Keeps both processes alive via Supervisor:
-  - Python bot
-  - Obsidian Headless continuous sync
+- [Key Features](#key-features)
+- [Tech Stack](#tech-stack)
+- [Prerequisites](#prerequisites)
+- [Getting Started](#getting-started)
+- [How It Works](#how-it-works)
+- [Configuration Reference](#configuration-reference)
+- [Available Commands](#available-commands)
+- [Troubleshooting](#troubleshooting)
+- [Security Notes](#security-notes)
+- [Repository Structure](#repository-structure)
+- [License](#license)
 
-## Architecture
+## Key Features
 
-The container runs two processes managed by `supervisord`:
+- Telegram voice message ingestion (`.ogg`).
+- Telegram image ingestion (photo and image document).
+- Telegram plain text message ingestion.
+- Telegram document ingestion (including PDF).
+- Local audio transcription via `whisper.cpp` (CPU).
+- Summary generation:
+  - local extractive summary
+  - optional Gemini summary
+- Daily note append workflow with media embed + transcript + summary.
+- Continuous Obsidian sync with `ob sync --continuous`.
+- Strict runtime configuration: missing required env vars fail fast.
 
-- **Process 1:** `python /app/bot.py`
-- **Process 2:** `ob sync --continuous --path /vault`
+## Tech Stack
 
-The Docker bind mount `./vault:/vault` persists notes/media and local `ob` state.
+- **Language**: Python 3.11
+- **Bot Framework**: `python-telegram-bot`
+- **Transcription**: `whisper.cpp` (`whisper-cli`)
+- **Image handling**: Pillow
+- **Optional AI summary**: `google-genai`
+- **Process manager**: Supervisor
+- **Container runtime**: Docker + Docker Compose
+- **Obsidian sync**: `obsidian-headless` CLI
+
+## Prerequisites
+
+- Docker and Docker Compose available on your machine
+- Telegram bot token from BotFather
+- Obsidian account with Sync enabled (for remote vault sync)
+
+## Getting Started
+
+### 1) Clone the repository
+
+```bash
+git clone https://github.com/giacomoleonzi/obsidian-telegram-daily-bot.git
+cd obsidian-telegram
+```
+
+### 2) Create local env file
+
+```bash
+cp config/.env.example config/.env
+```
+
+Edit `config/.env` and set all required values.
+
+### 3) Build and start container
+
+```bash
+docker compose up -d --build
+```
+
+### 4) Run one-time Obsidian setup
+
+```bash
+docker compose exec obsidian-telegram bash
+setup.sh
+```
+
+`setup.sh` intentionally keeps login/sync setup interactive.
+
+> You can run setup **with or without** `OB_EMAIL` and `OB_PASSWORD`.
+> - If set: script uses them and optionally asks MFA.
+> - If not set: script falls back to full interactive `ob login`.
+
+### 5) Verify logs
+
+```bash
+docker compose logs -f
+```
+
+## How It Works
+
+The container runs two supervised processes:
+
+- `python /app/bot.py`
+- `ob sync --continuous --path /vault`
+
+`./vault:/vault` is bind-mounted so your notes, media, and Obsidian auth state persist.
 
 ```mermaid
 flowchart TD
-  U[Telegram user] -->|Sends voice/image| TG[Telegram Bot API]
-  TG -->|Voice update| BOT[bot.py]
-  TG -->|Photo update| BOT
-  BOT -->|Download media| MEDIA["Media (default: 999 - File Bucket)"]
-  BOT -->|Local whisper.cpp| STT[Text transcription]
-  STT --> SUM[Local or Gemini summary]
-  BOT -->|Append daily note| DAILY[/vault/000 - Daily/YYYY-MM-DD.md]
-  MEDIA --> VAULT[(Obsidian Vault)]
-  STT --> DAILY
-  SUM --> DAILY
-  DAILY --> VAULT
-  SUP[supervisord] --> BOT
-  SUP --> OBS[ob sync --continuous]
-  VAULT --> OBS
-  OBS -->|Remote sync| OS[Obsidian Sync]
+  U[Telegram user] -->|Sends voice image text or file| TG[Telegram Bot API]
+  TG --> BOT[bot.py]
+  BOT --> MEDIA[Media folder from BOT_MEDIA_SUBDIR]
+  BOT --> STT[whisper-cli local transcription]
+  STT --> SUM[Local summary or Gemini summary]
+  BOT --> NOTE[Daily note from BOT_DAILY_SUBDIR]
+  MEDIA --> NOTE
+  NOTE --> VAULT[Vault at OB_VAULT_PATH]
+  VAULT --> OBS[ob sync --continuous]
+  OBS --> REMOTE[Obsidian Sync remote vault]
 ```
 
-## Telegram Flow
+## Configuration Reference
 
-1. The bot receives an update with `message.voice`.
-2. It downloads the audio via `get_file(...).download_to_drive(...)`.
-3. It saves the audio into the vault media folder (`BOT_MEDIA_SUBDIR`).
-4. It transcribes and summarizes the content.
-5. It appends the result to the daily note (`YYYY-MM-DD.md`).
+All runtime config comes from `config/.env` (loaded by Compose).
 
-For images:
+| Variable | Required | Description | Example |
+|---|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | yes | Telegram bot token | `123456:ABC...` |
+| `OB_VAULT_PATH` | yes | Vault path in container | `/vault` |
+| `OB_DEVICE_NAME` | yes | Obsidian sync device name | `raspberrypi` |
+| `OB_EMAIL` | no | Optional Obsidian email for setup script | `name@example.com` |
+| `OB_PASSWORD` | no | Optional Obsidian password for setup script | `...` |
+| `BOT_DAILY_SUBDIR` | yes | Folder for daily note | `Daily-folder` |
+| `BOT_MEDIA_SUBDIR` | yes | Folder for audio/images | `Media-folder` |
+| `BOT_DAILY_NOTE_FORMAT` | yes | `strftime` note name format (`.md` auto-added) | `%Y-%m-%d` |
+| `BOT_LOG_LEVEL` | yes | Python log level | `INFO` |
+| `BOT_NOTE_TEMPLATE` | yes | Audio embed template (`{audio_file}` required) | `![[{audio_file}]]` |
+| `BOT_IMAGE_NOTE_TEMPLATE` | yes | Image embed template (`{image_file}` required) | `![[{image_file}]]` |
+| `IMAGE_COMPRESSION_ENABLED` | yes | Enable image compression | `true` |
+| `IMAGE_MAX_BYTES` | yes | Target max image size | `5242880` |
+| `IMAGE_MAX_DIMENSION` | yes | Max width/height during compression | `2560` |
+| `IMAGE_JPEG_QUALITY_START` | yes | Initial JPEG quality | `90` |
+| `IMAGE_JPEG_QUALITY_MIN` | yes | Minimum JPEG quality | `55` |
+| `IMAGE_JPEG_QUALITY_STEP` | yes | JPEG quality decrement step (>0) | `5` |
+| `STT_PROVIDER` | yes | Currently supported: `local` | `local` |
+| `STT_LANGUAGE` | yes | Whisper language code | `it` |
+| `WHISPER_CLI_PATH` | yes | Path to `whisper-cli` | `/usr/local/bin/whisper-cli` |
+| `WHISPER_MODEL_PATH` | yes | Path to GGML model | `/models/ggml-base.bin` |
+| `SUMMARY_PROVIDER` | yes | `local` or `gemini` | `local` |
+| `GEMINI_API_KEY` | conditional | Required if `SUMMARY_PROVIDER=gemini` | `AIza...` |
+| `GEMINI_MODEL` | yes | Gemini model name | `gemini-2.5-flash` |
+| `GEMINI_SUMMARY_PROMPT` | yes | Prompt for Gemini summary | `Summarize...` |
 
-1. The bot receives `message.photo` (or an image document).
-2. It downloads the image into the vault media folder (`BOT_MEDIA_SUBDIR`).
-3. It appends an embed to the same daily note using `![[image.ext]]`.
+## Available Commands
 
-## Obsidian Flow
+```bash
+# Build and start
+docker compose up -d --build
 
-1. `ob login` (interactive) authenticates your Obsidian account.
-2. `ob sync-setup` links local vault (`/vault`) to a remote Obsidian Sync vault.
-3. `ob sync --continuous` watches local changes and syncs continuously.
+# Open shell in container
+docker compose exec obsidian-telegram bash
 
-## Configuration
+# One-time interactive setup
+setup.sh
 
-All configuration files live in `config/`. The bot now runs in strict configuration mode: required variables must be explicitly set in `config/.env`.
+# Logs
+docker compose logs -f
 
-| Variable | Description | Default |
-|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | Bot token from BotFather | `replace_with_your_bot_token` |
-| `OB_VAULT_PATH` | Vault path inside container | `/vault` |
-| `OB_DEVICE_NAME` | Device name for Obsidian Sync | `raspberrypi` |
-| `OB_EMAIL` | Optional Obsidian account email (used by `setup.sh`) | empty |
-| `OB_PASSWORD` | Optional Obsidian password (never commit real credentials) | empty |
-| `OB_MFA` | One-time 2FA code: export in shell only, do not store in files | — |
-| `BOT_DAILY_SUBDIR` | Folder where the daily note is written | `000 - Daily` |
-| `BOT_MEDIA_SUBDIR` | Folder where audio/images are stored | `999 - File Bucket` |
-| `BOT_DAILY_NOTE_FORMAT` | Note name format (`strftime`; `.md` is auto-added if missing) | `%Y-%m-%d` |
-| `BOT_LOG_LEVEL` | Python log level | `INFO` |
-| `BOT_NOTE_TEMPLATE` | Audio note template (must include `{audio_file}`) | `![[{audio_file}]]` |
-| `BOT_IMAGE_NOTE_TEMPLATE` | Image note template (must include `{image_file}`) | `![[{image_file}]]` |
-| `IMAGE_COMPRESSION_ENABLED` | Enable image compression before saving | `true` |
-| `IMAGE_MAX_BYTES` | Max target image size in bytes | `5242880` |
-| `IMAGE_MAX_DIMENSION` | Max image side length during compression | `2560` |
-| `IMAGE_JPEG_QUALITY_START` | Starting JPEG quality | `90` |
-| `IMAGE_JPEG_QUALITY_MIN` | Minimum JPEG quality | `55` |
-| `IMAGE_JPEG_QUALITY_STEP` | JPEG quality decrement step | `5` |
-| `STT_PROVIDER` | Speech-to-text provider (`local`) | `local` |
-| `STT_LANGUAGE` | whisper.cpp language | `it` |
-| `WHISPER_CLI_PATH` | Path to `whisper-cli` binary | `/usr/local/bin/whisper-cli` |
-| `WHISPER_MODEL_PATH` | Path to ggml model | `/models/ggml-base.bin` |
-| `SUMMARY_PROVIDER` | Summary provider (`local` or `gemini`) | `local` |
-| `GEMINI_API_KEY` | Gemini API key (required only with `SUMMARY_PROVIDER=gemini`) | empty |
-| `GEMINI_MODEL` | Gemini model name for summaries | `gemini-2.5-flash` |
-| `GEMINI_SUMMARY_PROMPT` | Custom summary prompt | `Summarize the text...` |
+# Stop stack
+docker compose down
+```
 
-Main files:
+## Troubleshooting
 
-- `docker-compose.yml`
-- `Dockerfile`
-- `bot.py`
-- `config/supervisord.conf`
-- `config/setup.sh`
-- `config/.env.example` (copy to local `config/.env`; `.env` must not be committed)
+### Bot does not receive messages
 
-## Security
+- Ensure only one instance is polling the same token.
+- Check logs for Telegram `Conflict` errors.
 
-- Never commit `config/.env`: it contains `TELEGRAM_BOT_TOKEN` and may include `GEMINI_API_KEY` and Obsidian credentials.
-- Never post tokens, passwords, or API keys in issues or PRs. Rotate the token in BotFather immediately if exposed.
-- The repository includes `.gitignore` rules for `config/.env` and `vault/`.
+### `setup.sh` fails at login
 
-## Operational Notes
+- Retry in interactive mode (leave `OB_EMAIL`/`OB_PASSWORD` empty).
+- If using MFA, provide current one-time code when prompted.
 
-- Obsidian setup is one-time per environment/container.
-- Do not automate `ob login`; it requires interactive input.
-- If you use Obsidian 2FA:
-  - keep interactive login (recommended), or
-  - set `OB_EMAIL`/`OB_PASSWORD` and provide the one-time code when `setup.sh` asks.
-- To view logs:
-  - `docker compose logs -f`
-- To use Gemini summaries:
-  - set `SUMMARY_PROVIDER=gemini`
-  - add `GEMINI_API_KEY` in `config/.env`
+### Whisper errors
+
+- Verify `WHISPER_CLI_PATH` and `WHISPER_MODEL_PATH`.
+- Confirm model file exists inside container (`/models/ggml-base.bin`).
+
+### Gemini summary not working
+
+- Set `SUMMARY_PROVIDER=gemini`.
+- Set valid `GEMINI_API_KEY`.
+
+### Mermaid diagram not rendering on GitHub
+
+- Keep labels simple (avoid special characters-heavy labels).
+
+## Security Notes
+
+- Never commit `config/.env`.
+- Never paste tokens/passwords/API keys in issues, PRs, or logs.
+- Rotate Telegram/Gemini credentials if exposed.
+- Keep `vault/` local and private unless intentionally shared.
+
+## Repository Structure
+
+```text
+.
+├── bot.py
+├── Dockerfile
+├── docker-compose.yml
+├── config/
+│   ├── .env.example
+│   ├── setup.sh
+│   └── supervisord.conf
+├── vault/                # local bind mount target (ignored)
+└── README.md
+```
 
 ## License
 
