@@ -1,0 +1,21 @@
+# Obsidian + Telegram Docker setup (Pi / ARM64)
+
+When you work on this project, prefer modifying `Dockerfile`, `bot.py`, and files under `config/` only.
+
+## One-time `ob login` / `ob sync-setup` in Cursor
+
+1. Run `docker compose up -d --build` to start the container.
+   - If needed first: `cp config/.env.example config/.env` and set `TELEGRAM_BOT_TOKEN`.
+2. Open the Cursor terminal and attach to the running container:
+   - `docker compose exec obsidian-telegram bash`
+3. Run:
+   - `setup.sh`
+4. For the `ob login` step:
+   - Copy/paste any `ob` prompt output (verification URL / auth code) exactly as requested.
+   - Do not close the terminal until the command completes.
+5. For `ob sync-setup`:
+   - Provide the remote vault id/name when prompted.
+   - If it asks for an encryption password/device confirmation, enter it interactively.
+
+Never attempt to “auto-script” `ob login` / `ob sync-setup` beyond prompting for user input.
+
