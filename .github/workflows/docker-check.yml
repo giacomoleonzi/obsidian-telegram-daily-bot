@@ -13,6 +13,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare CI env file
+        run: cp config/.env.example config/.env
+
       - name: Validate compose file
         run: docker compose config
 
