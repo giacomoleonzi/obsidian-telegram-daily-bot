@@ -80,21 +80,6 @@ def _run_ffmpeg_convert(input_path: Path, output_path: Path) -> None:
     subprocess.run(command, check=True, capture_output=True, text=True)
 
 
-def _extract_text_from_whisper_output(raw_output: str) -> str:
-    lines: list[str] = []
-    for line in raw_output.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("[") and "]" in stripped:
-            content = stripped.split("]", maxsplit=1)[-1].strip()
-            if content:
-                lines.append(content)
-        else:
-            lines.append(stripped)
-    return "\n".join(lines).strip()
-
-
 def _transcribe_local_whisper(
     ogg_path: Path,
     wav_path: Path,
@@ -174,6 +159,18 @@ def _image_entry_markdown(message_dt: datetime, image_embed: str, caption: str) 
     ts = message_dt.strftime("%H:%M:%S UTC")
     caption_block = f"\n\n#### Caption\n\n{caption}\n" if caption else "\n"
     return f"### Immagine {ts}\n\n{image_embed}{caption_block}"
+
+
+def _text_entry_markdown(message_dt: datetime, text: str) -> str:
+    ts = message_dt.strftime("%H:%M:%S UTC")
+    body = text.strip() or "(empty text message)"
+    return f"### Text {ts}\n\n{body}\n"
+
+
+def _document_entry_markdown(message_dt: datetime, file_embed: str, caption: str) -> str:
+    ts = message_dt.strftime("%H:%M:%S UTC")
+    caption_block = f"\n\n#### Caption\n\n{caption}\n" if caption else "\n"
+    return f"### File {ts}\n\n{file_embed}{caption_block}"
 
 
 async def _append_to_daily_note(note_path: Path, entry: str, lock: asyncio.Lock, note_date: datetime) -> None:
@@ -379,6 +376,72 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logging.exception("Failed processing image message")
 
 
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None or update.message.text is None:
+        return
+    message = update.message
+    text = message.text.strip()
+    if not text:
+        return
+
+    daily_dir: Path = context.application.bot_data["daily_dir"]
+    note_pattern: str = context.application.bot_data["daily_note_format"]
+    note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+
+    message_dt = _message_dt_utc(message.date)
+    note_path = _daily_note_path(daily_dir, message_dt, note_pattern)
+
+    try:
+        entry = _text_entry_markdown(message_dt=message_dt, text=text)
+        await _append_to_daily_note(note_path, entry, note_lock, message_dt)
+        logging.info("Updated daily note with text: %s", note_path)
+    except Exception:
+        logging.exception("Failed processing text message")
+
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None or update.message.document is None:
+        return
+    message = update.message
+    document = message.document
+
+    # Image documents are already handled by handle_image.
+    if (document.mime_type or "").startswith("image/"):
+        return
+
+    await context.bot.send_chat_action(chat_id=message.chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+
+    daily_dir: Path = context.application.bot_data["daily_dir"]
+    media_dir: Path = context.application.bot_data["media_dir"]
+    media_subdir: str = context.application.bot_data["media_subdir"]
+    note_pattern: str = context.application.bot_data["daily_note_format"]
+    note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+
+    message_dt = _message_dt_utc(message.date)
+    unique_part = _safe_stem(str(document.file_unique_id or document.file_id))
+    original_name = _safe_stem(Path(document.file_name or "document").stem)
+    suffix = Path(document.file_name or "document.bin").suffix or ".bin"
+    filename = f"{_timestamp_id(message_dt)}_{original_name}_{unique_part}{suffix}"
+    doc_path = media_dir / filename
+    note_path = _daily_note_path(daily_dir, message_dt, note_pattern)
+
+    try:
+        media_dir.mkdir(parents=True, exist_ok=True)
+        telegram_file = await context.bot.get_file(document.file_id)
+        if not doc_path.exists():
+            await telegram_file.download_to_drive(custom_path=str(doc_path))
+
+        entry = _document_entry_markdown(
+            message_dt=message_dt,
+            file_embed=f"![[{media_subdir}/{doc_path.name}]]",
+            caption=message.caption or "",
+        )
+        await _append_to_daily_note(note_path, entry, note_lock, message_dt)
+        logging.info("Updated daily note with file: %s", note_path)
+    except Exception:
+        logging.exception("Failed processing document message")
+
+
 async def handle_application_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle global telegram application errors."""
     if isinstance(context.error, Conflict):
@@ -467,12 +530,17 @@ def main() -> None:
         level=log_level_value,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Reduce noisy framework logs (including bot-id related HTTP traces).
+    logging.getLogger("telegram").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     application = Application.builder().token(str(config["token"])).build()
     application.bot_data.update(config)
     application.bot_data["note_lock"] = asyncio.Lock()
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
+    application.add_handler(MessageHandler(filters.Document.ALL & ~filters.Document.IMAGE, handle_document))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_error_handler(handle_application_error)
 
     logging.info(
@@ -481,7 +549,8 @@ def main() -> None:
         config["stt_provider"],
         config["summary_provider"],
     )
-    application.run_polling()
+    # Use 60s long polling to avoid frequent 10s idle requests.
+    application.run_polling(timeout=60)
 
 
 if __name__ == "__main__":
