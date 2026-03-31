@@ -26,6 +26,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Telegram image ingestion (photo and image document).
 - Telegram plain text message ingestion.
 - Telegram document ingestion (including PDF).
+- `/whoami` command to verify Telegram `chat_id` and `user_id`.
 - Local audio transcription via `whisper.cpp` (CPU).
 - Summary generation:
   - local extractive summary
@@ -160,6 +161,9 @@ docker compose exec obsidian-telegram bash
 # One-time interactive setup
 setup.sh
 
+# Verify Telegram identity in chat
+/whoami
+
 # Logs
 docker compose logs -f
 
@@ -173,6 +177,7 @@ docker compose down
 
 - Ensure only one instance is polling the same token.
 - Check logs for Telegram `Conflict` errors.
+- Send `/whoami` to the bot and verify the returned `chat_id` / `user_id`.
 
 ### `setup.sh` fails at login
 

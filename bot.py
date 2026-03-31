@@ -17,7 +17,7 @@ from PIL import Image, ImageOps
 from telegram import Update
 from telegram.error import Conflict
 from telegram.constants import ChatAction
-from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 try:
     from google import genai
@@ -442,6 +442,27 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logging.exception("Failed processing document message")
 
 
+async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reply with chat/user identifiers for quick verification."""
+    if update.message is None:
+        return
+    message = update.message
+    user = message.from_user
+    chat = message.chat
+    lines = [
+        "Identity check:",
+        f"- chat_id: `{chat.id}`",
+        f"- chat_type: `{chat.type}`",
+    ]
+    if user is not None:
+        lines.append(f"- user_id: `{user.id}`")
+        if user.username:
+            lines.append(f"- username: `@{user.username}`")
+        if user.full_name:
+            lines.append(f"- full_name: `{user.full_name}`")
+    await message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 async def handle_application_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle global telegram application errors."""
     if isinstance(context.error, Conflict):
@@ -537,6 +558,7 @@ def main() -> None:
     application = Application.builder().token(str(config["token"])).build()
     application.bot_data.update(config)
     application.bot_data["note_lock"] = asyncio.Lock()
+    application.add_handler(CommandHandler("whoami", cmd_whoami))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
     application.add_handler(MessageHandler(filters.Document.ALL & ~filters.Document.IMAGE, handle_document))
