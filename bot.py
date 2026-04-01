@@ -466,15 +466,17 @@ async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     """Reply with chat/user identifiers for quick verification."""
     if update.message is None:
         return
-    if not _is_authorized_chat(update, context):
-        return
     message = update.message
     user = message.from_user
     chat = message.chat
+    authorized_chat_id = int(context.application.bot_data["authorized_chat_id"])
+    is_authorized = int(chat.id) == authorized_chat_id
     lines = [
         "Identity check:",
         f"- chat_id: `{chat.id}`",
         f"- chat_type: `{chat.type}`",
+        f"- authorized_chat_id: `{authorized_chat_id}`",
+        f"- is_authorized_chat: `{is_authorized}`",
     ]
     if user is not None:
         lines.append(f"- user_id: `{user.id}`")
