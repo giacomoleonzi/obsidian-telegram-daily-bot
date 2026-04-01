@@ -173,6 +173,18 @@ def _document_entry_markdown(message_dt: datetime, file_embed: str, caption: str
     return f"### File {ts}\n\n{file_embed}{caption_block}"
 
 
+def _is_authorized_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Allow updates only from the configured authorized chat id."""
+    if update.message is None:
+        return False
+    authorized_chat_id = int(context.application.bot_data["authorized_chat_id"])
+    current_chat_id = int(update.message.chat_id)
+    if current_chat_id == authorized_chat_id:
+        return True
+    logging.warning("Ignoring update from unauthorized chat_id=%s", current_chat_id)
+    return False
+
+
 async def _append_to_daily_note(note_path: Path, entry: str, lock: asyncio.Lock, note_date: datetime) -> None:
     header = f"# Daily {note_date.strftime('%Y-%m-%d')}\n\n" if not note_path.exists() else ""
     separator_ts = note_date.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -239,6 +251,8 @@ def _compress_image_to_limit(
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None or update.message.voice is None:
+        return
+    if not _is_authorized_chat(update, context):
         return
     message = update.message
     await context.bot.send_chat_action(chat_id=message.chat_id, action=ChatAction.RECORD_VOICE)
@@ -310,6 +324,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None:
         return
+    if not _is_authorized_chat(update, context):
+        return
     message = update.message
     if message.photo:
         file_id = message.photo[-1].file_id
@@ -379,6 +395,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None or update.message.text is None:
         return
+    if not _is_authorized_chat(update, context):
+        return
     message = update.message
     text = message.text.strip()
     if not text:
@@ -401,6 +419,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None or update.message.document is None:
+        return
+    if not _is_authorized_chat(update, context):
         return
     message = update.message
     document = message.document
@@ -446,6 +466,8 @@ async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     """Reply with chat/user identifiers for quick verification."""
     if update.message is None:
         return
+    if not _is_authorized_chat(update, context):
+        return
     message = update.message
     user = message.from_user
     chat = message.chat
@@ -477,6 +499,7 @@ async def handle_application_error(update: object, context: ContextTypes.DEFAULT
 
 def _load_bot_config() -> dict[str, str | Path]:
     token = _required_env("TELEGRAM_BOT_TOKEN")
+    authorized_chat_id = _required_int_env("AUTHORIZED_CHAT_ID")
     vault_path = Path(_required_env("OB_VAULT_PATH"))
     daily_subdir = Path(_required_env("BOT_DAILY_SUBDIR"))
     media_subdir = Path(_required_env("BOT_MEDIA_SUBDIR"))
@@ -519,6 +542,7 @@ def _load_bot_config() -> dict[str, str | Path]:
 
     return {
         "token": token,
+        "authorized_chat_id": authorized_chat_id,
         "daily_dir": daily_dir,
         "media_dir": media_dir,
         "media_subdir": str(media_subdir),
@@ -566,10 +590,11 @@ def main() -> None:
     application.add_error_handler(handle_application_error)
 
     logging.info(
-        "Telegram bot started - daily_dir=%s stt_provider=%s summary_provider=%s",
+        "Telegram bot started - daily_dir=%s stt_provider=%s summary_provider=%s authorized_chat_id=%s",
         config["daily_dir"],
         config["stt_provider"],
         config["summary_provider"],
+        config["authorized_chat_id"],
     )
     # Use 60s long polling to avoid frequent 10s idle requests.
     application.run_polling(timeout=60)

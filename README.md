@@ -27,6 +27,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Telegram plain text message ingestion.
 - Telegram document ingestion (including PDF).
 - `/whoami` command to verify Telegram `chat_id` and `user_id`.
+- Chat-level access control: accepts updates only from `AUTHORIZED_CHAT_ID`.
 - Local audio transcription via `whisper.cpp` (CPU).
 - Summary generation:
   - local extractive summary
@@ -124,6 +125,7 @@ All runtime config comes from `config/.env` (loaded by Compose).
 | Variable | Required | Description | Example |
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | yes | Telegram bot token | `123456:ABC...` |
+| `AUTHORIZED_CHAT_ID` | yes | Only this chat id is allowed to interact with the bot | `123456789` |
 | `OB_VAULT_PATH` | yes | Vault path in container | `/vault` |
 | `OB_DEVICE_NAME` | yes | Obsidian sync device name | `raspberrypi` |
 | `OB_EMAIL` | no | Optional Obsidian email for setup script | `name@example.com` |
@@ -178,6 +180,7 @@ docker compose down
 - Ensure only one instance is polling the same token.
 - Check logs for Telegram `Conflict` errors.
 - Send `/whoami` to the bot and verify the returned `chat_id` / `user_id`.
+- Verify `AUTHORIZED_CHAT_ID` matches your private chat id with the bot.
 
 ### `setup.sh` fails at login
 
