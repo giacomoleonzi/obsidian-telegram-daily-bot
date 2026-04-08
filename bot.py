@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sync import ALLOWED_SYNC_PROVIDERS, DropboxSyncProvider, ObsidianSyncProvider, SyncProvider
+
 from PIL import Image, ImageOps
 from telegram import Update
 from telegram.error import Conflict
@@ -537,6 +539,21 @@ def _load_bot_config() -> dict[str, object]:
     daily_dir = vault_path / daily_subdir
     media_dir = vault_path / media_subdir
 
+    sync_provider_name = (os.getenv("SYNC_PROVIDER") or "obsidian").lower()
+    if sync_provider_name not in ALLOWED_SYNC_PROVIDERS:
+        raise RuntimeError(f"Unsupported SYNC_PROVIDER: {sync_provider_name}")
+
+    sync_provider: SyncProvider
+    if sync_provider_name == "dropbox":
+        sync_provider = DropboxSyncProvider(
+            app_key=_required_env("DROPBOX_APP_KEY"),
+            app_secret=_required_env("DROPBOX_APP_SECRET"),
+            refresh_token=_required_env("DROPBOX_REFRESH_TOKEN"),
+            base_path=_required_env("DROPBOX_BASE_PATH"),
+        )
+    else:
+        sync_provider = ObsidianSyncProvider()
+
     log_level = _required_env("BOT_LOG_LEVEL").upper()
     valid_levels = set(logging.getLevelNamesMapping().keys())
     if log_level not in valid_levels:
@@ -578,6 +595,8 @@ def _load_bot_config() -> dict[str, object]:
         "daily_dir": daily_dir,
         "media_dir": media_dir,
         "media_subdir": str(media_subdir),
+        "daily_subdir": str(daily_subdir),
+        "sync_provider": sync_provider,
         "daily_note_format": daily_note_format,
         "log_level": log_level,
         "note_template": note_template,
@@ -614,6 +633,11 @@ def main() -> None:
     application = Application.builder().token(str(config["token"])).build()
     application.bot_data.update(config)
     application.bot_data["note_lock"] = asyncio.Lock()
+
+    async def _post_init(app: Application) -> None:
+        await app.bot_data["sync_provider"].start()
+
+    application.post_init = _post_init
     application.add_handler(CommandHandler("whoami", cmd_whoami))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
