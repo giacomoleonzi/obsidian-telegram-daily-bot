@@ -49,6 +49,7 @@ RUN mkdir -p /app /vault/Inbox/Audio
 WORKDIR /app
 
 COPY bot.py /app/bot.py
+COPY sync.py /app/sync.py
 COPY config/setup.sh /usr/local/bin/setup.sh
 COPY config/supervisord.conf /etc/supervisor/supervisord.conf
 
