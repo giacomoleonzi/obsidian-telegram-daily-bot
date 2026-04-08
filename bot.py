@@ -652,7 +652,11 @@ def main() -> None:
     async def _post_init(app: Application) -> None:
         await app.bot_data["sync_provider"].start()
 
+    async def _post_shutdown(app: Application) -> None:
+        await app.bot_data["sync_provider"].stop()
+
     application.post_init = _post_init
+    application.post_shutdown = _post_shutdown
     application.add_handler(CommandHandler("whoami", cmd_whoami))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))

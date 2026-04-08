@@ -84,10 +84,16 @@ class DropboxSyncProvider(SyncProvider):
                 )
                 logger.info("Uploaded to Dropbox: %s", dest)
                 return
-            except Exception:
+            except dropbox.exceptions.AuthError:
+                logger.exception("Dropbox auth failed (check credentials): %s", dest)
+                return
+            except (dropbox.exceptions.ApiError, OSError):
                 if attempt == max_retries:
                     logger.exception("Dropbox upload failed after %d attempts: %s", max_retries, dest)
                     return
                 wait = 2 ** attempt
                 logger.warning("Dropbox upload attempt %d failed, retrying in %ds: %s", attempt, wait, dest)
                 await asyncio.sleep(wait)
+            except Exception:
+                logger.exception("Unexpected error uploading to Dropbox: %s", dest)
+                return
