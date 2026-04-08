@@ -54,6 +54,23 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Docker and Docker Compose available on your machine
 - Telegram bot token from BotFather
 - Obsidian account with Sync enabled (for remote vault sync)
+- **OR** a Dropbox account (for Dropbox sync, see [Dropbox Setup](docs/dropbox-setup.md))
+
+## Sync Providers
+
+The bot supports two sync backends. Choose one via the `SYNC_PROVIDER` environment variable.
+
+### Obsidian Sync (default)
+
+Uses Obsidian's native sync service. Requires an Obsidian account with Sync enabled. The container runs `ob sync --continuous` as a background process.
+
+Set `SYNC_PROVIDER=obsidian` (or leave unset, it is the default).
+
+### Dropbox
+
+Uses the Dropbox API to upload notes and media after each message. No Obsidian Sync subscription needed. Works on any machine (no Dropbox client required).
+
+Set `SYNC_PROVIDER=dropbox` and configure Dropbox credentials. See [Dropbox Setup](docs/dropbox-setup.md) for the full guide.
 
 ## Getting Started
 
@@ -153,6 +170,12 @@ All runtime config comes from `config/.env` (loaded by Compose).
 | `GEMINI_API_KEY` | conditional | Required if `SUMMARY_PROVIDER=gemini` | `AIza...` |
 | `GEMINI_MODEL` | yes | Gemini model name | `gemini-2.5-flash` |
 | `GEMINI_SUMMARY_PROMPT` | yes | Prompt for Gemini summary | `Summarize...` |
+| `SYNC_PROVIDER` | no | Sync backend: `obsidian` (default) or `dropbox` | `dropbox` |
+| `OB_SYNC_AUTOSTART` | no | Set `false` when using Dropbox | `true` |
+| `DROPBOX_APP_KEY` | conditional | Required if `SYNC_PROVIDER=dropbox` | `abc123...` |
+| `DROPBOX_APP_SECRET` | conditional | Required if `SYNC_PROVIDER=dropbox` | `xyz789...` |
+| `DROPBOX_REFRESH_TOKEN` | conditional | Required if `SYNC_PROVIDER=dropbox` | `sl.B0...` |
+| `DROPBOX_BASE_PATH` | conditional | Vault root path on Dropbox | `/plincode_works` |
 
 ## Available Commands
 
@@ -221,12 +244,17 @@ docker compose down
 ```text
 .
 ├── bot.py
+├── sync.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── config/
 │   ├── .env.example
 │   ├── setup.sh
 │   └── supervisord.conf
+├── scripts/
+│   └── dropbox_auth.py
+├── docs/
+│   └── dropbox-setup.md
 ├── vault/                # local bind mount target (ignored)
 └── README.md
 ```
