@@ -28,6 +28,8 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Telegram document ingestion (including PDF).
 - `/whoami` command to verify Telegram `chat_id` and `user_id`.
 - Chat-level access control: accepts updates only from `AUTHORIZED_CHAT_ID`.
+- User feedback after save: bot replies with `✅` on success and `❌` on handler errors.
+- Configurable displayed timezone for note timestamps via `BOT_TIMEZONE`.
 - Local audio transcription via `whisper.cpp` (CPU).
 - Summary generation:
   - local extractive summary
@@ -133,6 +135,7 @@ All runtime config comes from `config/.env` (loaded by Compose).
 | `BOT_DAILY_SUBDIR` | yes | Folder for daily note | `Daily-folder` |
 | `BOT_MEDIA_SUBDIR` | yes | Folder for audio/images | `Media-folder` |
 | `BOT_DAILY_NOTE_FORMAT` | yes | `strftime` note name format (`.md` auto-added) | `%Y-%m-%d` |
+| `BOT_TIMEZONE` | yes | IANA timezone used for visible note timestamps | `UTC` |
 | `BOT_LOG_LEVEL` | yes | Python log level | `INFO` |
 | `BOT_NOTE_TEMPLATE` | yes | Audio embed template (`{audio_file}` required) | `![[{audio_file}]]` |
 | `BOT_IMAGE_NOTE_TEMPLATE` | yes | Image embed template (`{image_file}` required) | `![[{image_file}]]` |
@@ -191,6 +194,11 @@ docker compose down
 
 - Verify `WHISPER_CLI_PATH` and `WHISPER_MODEL_PATH`.
 - Confirm model file exists inside container (`/models/ggml-base.bin`).
+
+### Timestamps look wrong
+
+- Set `BOT_TIMEZONE` in `config/.env` (example: `Europe/Rome`).
+- Restart container after changing env values.
 
 ### Gemini summary not working
 

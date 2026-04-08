@@ -29,7 +29,8 @@ RUN set -eux; \
 
 RUN npm install -g obsidian-headless
 
-RUN pip install --no-cache-dir google-genai pillow python-telegram-bot supervisor
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Build whisper.cpp for local CPU transcription on ARM64 (Raspberry Pi).
 RUN git clone https://github.com/ggml-org/whisper.cpp.git /tmp/whisper.cpp \

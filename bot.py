@@ -9,9 +9,10 @@ import os
 import re
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Final
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageOps
 from telegram import Update
@@ -34,10 +35,11 @@ def _safe_stem(value: str) -> str:
     return cleaned[:80] if cleaned else "file"
 
 
-def _message_dt_utc(message_dt: datetime | None) -> datetime:
+def _message_dt_local(message_dt: datetime | None, timezone_name: str) -> datetime:
+    tz = ZoneInfo(timezone_name)
     if message_dt is not None:
-        return message_dt.astimezone(timezone.utc)
-    return datetime.now(timezone.utc)
+        return message_dt.astimezone(tz)
+    return datetime.now(tz)
 
 def _required_env(name: str) -> str:
     value = os.getenv(name)
@@ -143,7 +145,7 @@ def _voice_entry_markdown(
     transcript: str,
     summary: str,
 ) -> str:
-    ts = message_dt.strftime("%H:%M:%S UTC")
+    ts = message_dt.strftime("%H:%M:%S %Z")
     safe_transcript = transcript or "Nessuna trascrizione disponibile."
     return (
         f"### Audio {ts}\n\n"
@@ -156,19 +158,19 @@ def _voice_entry_markdown(
 
 
 def _image_entry_markdown(message_dt: datetime, image_embed: str, caption: str) -> str:
-    ts = message_dt.strftime("%H:%M:%S UTC")
+    ts = message_dt.strftime("%H:%M:%S %Z")
     caption_block = f"\n\n#### Caption\n\n{caption}\n" if caption else "\n"
     return f"### Immagine {ts}\n\n{image_embed}{caption_block}"
 
 
 def _text_entry_markdown(message_dt: datetime, text: str) -> str:
-    ts = message_dt.strftime("%H:%M:%S UTC")
+    ts = message_dt.strftime("%H:%M:%S %Z")
     body = text.strip() or "(empty text message)"
     return f"### Text {ts}\n\n{body}\n"
 
 
 def _document_entry_markdown(message_dt: datetime, file_embed: str, caption: str) -> str:
-    ts = message_dt.strftime("%H:%M:%S UTC")
+    ts = message_dt.strftime("%H:%M:%S %Z")
     caption_block = f"\n\n#### Caption\n\n{caption}\n" if caption else "\n"
     return f"### File {ts}\n\n{file_embed}{caption_block}"
 
@@ -177,17 +179,24 @@ def _is_authorized_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     """Allow updates only from the configured authorized chat id."""
     if update.message is None:
         return False
-    authorized_chat_id = int(context.application.bot_data["authorized_chat_id"])
-    current_chat_id = int(update.message.chat_id)
+    authorized_chat_id = context.application.bot_data["authorized_chat_id"]
+    current_chat_id = update.message.chat_id
     if current_chat_id == authorized_chat_id:
         return True
     logging.warning("Ignoring update from unauthorized chat_id=%s", current_chat_id)
     return False
 
 
+async def _safe_reply(message, text: str) -> None:
+    try:
+        await message.reply_text(text)
+    except Exception:
+        logging.exception("Failed sending reply to user")
+
+
 async def _append_to_daily_note(note_path: Path, entry: str, lock: asyncio.Lock, note_date: datetime) -> None:
     header = f"# Daily {note_date.strftime('%Y-%m-%d')}\n\n" if not note_path.exists() else ""
-    separator_ts = note_date.strftime("%Y-%m-%d %H:%M:%S UTC")
+    separator_ts = note_date.strftime("%Y-%m-%d %H:%M:%S %Z")
     block = f"{header}---\n{separator_ts}\n\n{entry.strip()}\n\n"
     async with lock:
         await asyncio.to_thread(note_path.parent.mkdir, parents=True, exist_ok=True)
@@ -271,8 +280,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     gemini_model: str = context.application.bot_data["gemini_model"]
     gemini_prompt: str = context.application.bot_data["gemini_prompt"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+    timezone_name: str = context.application.bot_data["timezone_name"]
 
-    message_dt = _message_dt_utc(message.date)
+    message_dt = _message_dt_local(message.date, timezone_name)
     stem = f"{_timestamp_id(message_dt)}_{_safe_stem(str(message.voice.file_unique_id or message.voice.file_id))}"
     ogg_path = media_dir / f"{stem}.ogg"
     wav_path = Path(tempfile.gettempdir()) / f"{stem}.wav"
@@ -314,8 +324,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await _append_to_daily_note(note_path, entry, note_lock, message_dt)
         logging.info("Updated daily note with audio: %s", note_path)
+        await _safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing voice message")
+        await _safe_reply(message, "❌ Error while saving the message.")
     finally:
         if wav_path.exists():
             wav_path.unlink()
@@ -351,8 +363,9 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     image_quality_min: int = context.application.bot_data["image_quality_min"]
     image_quality_step: int = context.application.bot_data["image_quality_step"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+    timezone_name: str = context.application.bot_data["timezone_name"]
 
-    message_dt = _message_dt_utc(message.date)
+    message_dt = _message_dt_local(message.date, timezone_name)
     stem = f"{_timestamp_id(message_dt)}_{_safe_stem(str(unique_id))}"
     image_path = media_dir / f"{stem}{suffix}"
     note_path = _daily_note_path(daily_dir, message_dt, note_pattern)
@@ -388,8 +401,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await _append_to_daily_note(note_path, entry, note_lock, message_dt)
         logging.info("Updated daily note with image: %s", note_path)
+        await _safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing image message")
+        await _safe_reply(message, "❌ Error while saving the message.")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -405,16 +420,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     daily_dir: Path = context.application.bot_data["daily_dir"]
     note_pattern: str = context.application.bot_data["daily_note_format"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+    timezone_name: str = context.application.bot_data["timezone_name"]
 
-    message_dt = _message_dt_utc(message.date)
+    message_dt = _message_dt_local(message.date, timezone_name)
     note_path = _daily_note_path(daily_dir, message_dt, note_pattern)
 
     try:
         entry = _text_entry_markdown(message_dt=message_dt, text=text)
         await _append_to_daily_note(note_path, entry, note_lock, message_dt)
         logging.info("Updated daily note with text: %s", note_path)
+        await _safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing text message")
+        await _safe_reply(message, "❌ Error while saving the message.")
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -436,8 +454,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     media_subdir: str = context.application.bot_data["media_subdir"]
     note_pattern: str = context.application.bot_data["daily_note_format"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+    timezone_name: str = context.application.bot_data["timezone_name"]
 
-    message_dt = _message_dt_utc(message.date)
+    message_dt = _message_dt_local(message.date, timezone_name)
     unique_part = _safe_stem(str(document.file_unique_id or document.file_id))
     original_name = _safe_stem(Path(document.file_name or "document").stem)
     suffix = Path(document.file_name or "document.bin").suffix or ".bin"
@@ -458,8 +477,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         await _append_to_daily_note(note_path, entry, note_lock, message_dt)
         logging.info("Updated daily note with file: %s", note_path)
+        await _safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing document message")
+        await _safe_reply(message, "❌ Error while saving the message.")
 
 
 async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -469,15 +490,18 @@ async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     message = update.message
     user = message.from_user
     chat = message.chat
-    authorized_chat_id = int(context.application.bot_data["authorized_chat_id"])
-    is_authorized = int(chat.id) == authorized_chat_id
+    authorized_chat_id = context.application.bot_data["authorized_chat_id"]
+    is_authorized = chat.id == authorized_chat_id
     lines = [
         "Identity check:",
         f"- chat_id: `{chat.id}`",
         f"- chat_type: `{chat.type}`",
-        f"- authorized_chat_id: `{authorized_chat_id}`",
-        f"- is_authorized_chat: `{is_authorized}`",
     ]
+    if is_authorized:
+        lines.append(f"- authorized_chat_id: `{authorized_chat_id}`")
+        lines.append(f"- is_authorized_chat: `{is_authorized}`")
+    else:
+        lines.append("- is_authorized_chat: `False`")
     if user is not None:
         lines.append(f"- user_id: `{user.id}`")
         if user.username:
@@ -499,9 +523,14 @@ async def handle_application_error(update: object, context: ContextTypes.DEFAULT
     logging.exception("Unhandled telegram application error: %s", context.error)
 
 
-def _load_bot_config() -> dict[str, str | Path]:
+def _load_bot_config() -> dict[str, object]:
     token = _required_env("TELEGRAM_BOT_TOKEN")
     authorized_chat_id = _required_int_env("AUTHORIZED_CHAT_ID")
+    timezone_name = _required_env("BOT_TIMEZONE")
+    try:
+        ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise RuntimeError(f"Invalid BOT_TIMEZONE: {timezone_name}") from exc
     vault_path = Path(_required_env("OB_VAULT_PATH"))
     daily_subdir = Path(_required_env("BOT_DAILY_SUBDIR"))
     media_subdir = Path(_required_env("BOT_MEDIA_SUBDIR"))
@@ -545,6 +574,7 @@ def _load_bot_config() -> dict[str, str | Path]:
     return {
         "token": token,
         "authorized_chat_id": authorized_chat_id,
+        "timezone_name": timezone_name,
         "daily_dir": daily_dir,
         "media_dir": media_dir,
         "media_subdir": str(media_subdir),
@@ -592,10 +622,11 @@ def main() -> None:
     application.add_error_handler(handle_application_error)
 
     logging.info(
-        "Telegram bot started - daily_dir=%s stt_provider=%s summary_provider=%s authorized_chat_id=%s",
+        "Telegram bot started - daily_dir=%s stt_provider=%s summary_provider=%s timezone=%s authorized_chat_id=%s",
         config["daily_dir"],
         config["stt_provider"],
         config["summary_provider"],
+        config["timezone_name"],
         config["authorized_chat_id"],
     )
     # Use 60s long polling to avoid frequent 10s idle requests.

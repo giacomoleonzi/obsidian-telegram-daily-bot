@@ -4,12 +4,17 @@ services:
   obsidian-telegram:
     build:
       context: .
-    image: obsidian-telegram:arm64
+    image: obsidian-telegram:latest
     container_name: obsidian-telegram
     restart: unless-stopped
-    platform: linux/arm64
     env_file:
       - ./config/.env
     volumes:
       - ./vault:/vault
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "bot.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
