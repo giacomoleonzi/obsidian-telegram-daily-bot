@@ -11,6 +11,13 @@ DEVICE_NAME="${OB_DEVICE_NAME:?OB_DEVICE_NAME is required}"
 OB_EMAIL="${OB_EMAIL:-}"
 OB_PASSWORD="${OB_PASSWORD:-}"
 OB_MFA="${OB_MFA:-}"
+SYNC_PROVIDER="${SYNC_PROVIDER:-obsidian}"
+
+if [[ "${SYNC_PROVIDER}" == "dropbox" ]]; then
+  echo "SYNC_PROVIDER=dropbox: skipping Obsidian headless setup."
+  echo "See docs/dropbox-setup.md for Dropbox configuration."
+  exit 0
+fi
 
 echo "Obsidian headless setup"
 echo "Local vault path: ${VAULT_PATH}"
