@@ -195,17 +195,17 @@ async def _safe_reply(message, text: str) -> None:
 
 
 async def _append_to_daily_note(note_path: Path, entry: str, lock: asyncio.Lock, note_date: datetime) -> None:
+    async with lock:
+        await asyncio.to_thread(_append_to_daily_note_sync, note_path, entry, note_date)
+
+
+def _append_to_daily_note_sync(note_path: Path, entry: str, note_date: datetime) -> None:
+    note_path.parent.mkdir(parents=True, exist_ok=True)
     header = f"# Daily {note_date.strftime('%Y-%m-%d')}\n\n" if not note_path.exists() else ""
     separator_ts = note_date.strftime("%Y-%m-%d %H:%M:%S %Z")
     block = f"{header}---\n{separator_ts}\n\n{entry.strip()}\n\n"
-    async with lock:
-        await asyncio.to_thread(note_path.parent.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(_append_text, note_path, block)
-
-
-def _append_text(note_path: Path, content: str) -> None:
     with note_path.open("a", encoding="utf-8") as f:
-        f.write(content)
+        f.write(block)
 
 
 def _compress_image_to_limit(
