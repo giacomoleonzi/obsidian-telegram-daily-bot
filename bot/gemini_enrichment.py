@@ -145,3 +145,56 @@ def generate_tasks(transcript: str, api_key: str, model: str, prompt: str) -> st
     except Exception:
         logging.exception("Gemini task call failed")
         return None
+
+
+def enrich_transcript(
+    transcript: str,
+    api_key: str,
+    model: str,
+    summary_prompt: str,
+    task_prompt: str,
+) -> tuple[str | None, str | None]:
+    """Run both Gemini calls for opt-in promotion.
+
+    Empty/NONE model replies become ``None`` sections (still a success).
+    Network/API failures raise so the caller can mark the entry ``failed``
+    without writing partial cloud content when both calls error.
+
+    Args:
+        transcript: Local Whisper transcript.
+        api_key: Gemini API key.
+        model: Model name.
+        summary_prompt: Call A prompt body.
+        task_prompt: Call B prompt body.
+
+    Returns:
+        ``(summary, tasks)`` each optional.
+
+    Raises:
+        RuntimeError: If google-genai is missing.
+        Exception: Propagated from the Gemini client when a call fails.
+    """
+    summary_error: Exception | None = None
+    tasks_error: Exception | None = None
+    summary: str | None = None
+    tasks: str | None = None
+
+    try:
+        summary = normalize_gemini_text(
+            _generate_content(api_key, model, summary_prompt, transcript)
+        )
+    except Exception as exc:
+        logging.exception("Gemini summary call failed during promotion")
+        summary_error = exc
+
+    try:
+        tasks = normalize_task_markdown(
+            _generate_content(api_key, model, task_prompt, transcript)
+        )
+    except Exception as exc:
+        logging.exception("Gemini tasks call failed during promotion")
+        tasks_error = exc
+
+    if summary_error is not None and tasks_error is not None:
+        raise summary_error
+    return summary, tasks

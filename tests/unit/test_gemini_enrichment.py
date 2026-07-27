@@ -40,3 +40,31 @@ def test_normalize_task_markdown_numbered_and_noise() -> None:
 def test_normalize_task_markdown_none() -> None:
     assert normalize_task_markdown("NONE") is None
     assert normalize_task_markdown("solo prosa senza bullet") is None
+
+
+def test_enrich_transcript_raises_when_both_calls_fail(monkeypatch) -> None:
+    from bot import gemini_enrichment as ge
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(ge, "_generate_content", boom)
+    try:
+        ge.enrich_transcript("t", "key", "model", "s", "t")
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "network" in str(exc)
+
+
+def test_enrich_transcript_ok(monkeypatch) -> None:
+    from bot import gemini_enrichment as ge
+
+    def fake(_key, _model, prompt, _transcript):
+        if "summary" in prompt.lower() or prompt == "SUM":
+            return "- punto"
+        return "- [ ] task"
+
+    monkeypatch.setattr(ge, "_generate_content", fake)
+    summary, tasks = ge.enrich_transcript("ciao", "k", "m", "SUM", "TASK")
+    assert summary == "- punto"
+    assert tasks == "- [ ] task"

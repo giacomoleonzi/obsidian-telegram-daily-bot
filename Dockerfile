@@ -32,9 +32,13 @@ RUN npm install -g obsidian-headless
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Build whisper.cpp for local CPU transcription on ARM64 (Raspberry Pi).
-RUN git clone https://github.com/ggml-org/whisper.cpp.git /tmp/whisper.cpp \
+# Build whisper.cpp for local CPU transcription on ARM64 (Raspberry Pi / Apple Silicon).
+# Disable native CPU autodetection: latest ggml FP16 NEON needs +fp16 and breaks on
+# generic aarch64 Docker builders with "target specific option mismatch".
+RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git /tmp/whisper.cpp \
   && cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build \
+    -DGGML_NATIVE=OFF \
+    -DGGML_CPU_ARM_ARCH=armv8-a \
   && cmake --build /tmp/whisper.cpp/build --config Release -j"$(nproc)" \
   && cp /tmp/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli \
   && find /tmp/whisper.cpp/build -name "*.so*" -exec cp {} /usr/local/lib/ \; \

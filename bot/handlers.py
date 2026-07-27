@@ -13,7 +13,6 @@ from telegram.constants import ChatAction
 from telegram.error import Conflict
 from telegram.ext import ContextTypes
 
-from bot.gemini_enrichment import generate_summary, generate_tasks
 from bot.media import compress_image_to_limit
 from bot.notes import (
     append_to_daily_note,
@@ -26,31 +25,37 @@ from bot.notes import (
     timestamp_id,
     voice_entry_markdown,
 )
+from bot.promotion import format_local_reply, gemini_keyboard, promote_entry
+from bot.store import EntryStore, new_entry_id
 from bot.stt import transcribe_local_whisper
 
 
 def is_authorized_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Allow updates only from the configured authorized chat id."""
-    if update.message is None:
-        return False
     authorized_chat_id = context.application.bot_data["authorized_chat_id"]
-    current_chat_id = update.message.chat_id
-    if current_chat_id == authorized_chat_id:
+    chat_id: int | None = None
+    if update.callback_query is not None and update.callback_query.message is not None:
+        chat_id = update.callback_query.message.chat_id
+    elif update.message is not None:
+        chat_id = update.message.chat_id
+    if chat_id is None:
+        return False
+    if chat_id == authorized_chat_id:
         return True
-    logging.warning("Ignoring update from unauthorized chat_id=%s", current_chat_id)
+    logging.warning("Ignoring update from unauthorized chat_id=%s", chat_id)
     return False
 
 
-async def safe_reply(message, text: str) -> None:
+async def safe_reply(message, text: str, **kwargs) -> None:
     """Reply to the user, logging failures without raising."""
     try:
-        await message.reply_text(text)
+        await message.reply_text(text, **kwargs)
     except Exception:
         logging.exception("Failed sending reply to user")
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Download voice, transcribe, optionally enrich with Gemini, append note."""
+    """Download voice, transcribe locally, append note; optional Gemini button."""
     if update.message is None or update.message.voice is None:
         return
     if not is_authorized_chat(update, context):
@@ -67,19 +72,17 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     stt_language: str = context.application.bot_data["stt_language"]
     whisper_cli_path: str = context.application.bot_data["whisper_cli_path"]
     whisper_model_path: str = context.application.bot_data["whisper_model_path"]
-    summary_provider: str = context.application.bot_data["summary_provider"]
     gemini_api_key: str = context.application.bot_data["gemini_api_key"]
-    gemini_model: str = context.application.bot_data["gemini_model"]
-    gemini_summary_prompt: str = context.application.bot_data["gemini_summary_prompt"]
-    gemini_task_prompt: str = context.application.bot_data["gemini_task_prompt"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
     timezone_name: str = context.application.bot_data["timezone_name"]
+    store: EntryStore = context.application.bot_data["entry_store"]
 
     message_dt = message_dt_local(message.date, timezone_name)
     stem = f"{timestamp_id(message_dt)}_{safe_stem(str(message.voice.file_unique_id or message.voice.file_id))}"
     ogg_path = media_dir / f"{stem}.ogg"
     wav_path = Path(tempfile.gettempdir()) / f"{stem}.wav"
     note_path = daily_note_path(daily_dir, message_dt, note_pattern)
+    entry_id = new_entry_id()
 
     try:
         media_dir.mkdir(parents=True, exist_ok=True)
@@ -98,34 +101,31 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 stt_language,
             )
 
-        summary: str | None = None
-        tasks: str | None = None
-        if summary_provider == "gemini":
-            summary = await asyncio.to_thread(
-                generate_summary,
-                transcription,
-                gemini_api_key,
-                gemini_model,
-                gemini_summary_prompt,
-            )
-            tasks = await asyncio.to_thread(
-                generate_tasks,
-                transcription,
-                gemini_api_key,
-                gemini_model,
-                gemini_task_prompt,
-            )
-
-        entry = voice_entry_markdown(
+        # Local-first: never call Gemini at capture time.
+        entry_md = voice_entry_markdown(
             message_dt=message_dt,
             audio_embed=note_template.format(audio_file=f"{media_subdir}/{ogg_path.name}"),
             transcript=transcription,
-            summary=summary,
-            tasks=tasks,
+            entry_id=entry_id,
         )
-        await append_to_daily_note(note_path, entry, note_lock, message_dt)
-        logging.info("Updated daily note with audio: %s", note_path)
-        await safe_reply(message, "✅")
+        await append_to_daily_note(note_path, entry_md, note_lock, message_dt)
+        logging.info("Updated daily note with audio: %s entry_id=%s", note_path, entry_id)
+
+        if gemini_api_key:
+            store.create_entry(
+                note_path=str(note_path),
+                transcript=transcription,
+                chat_id=message.chat_id,
+                telegram_user_message_id=message.message_id,
+                entry_id=entry_id,
+            )
+            sent = await message.reply_text(
+                format_local_reply(transcription),
+                reply_markup=gemini_keyboard(entry_id),
+            )
+            store.set_telegram_message_id(entry_id, sent.message_id)
+        else:
+            await safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing voice message")
         await safe_reply(message, "❌ Error while saving the message.")
@@ -312,6 +312,63 @@ async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if user.full_name:
             lines.append(f"- full_name: `{user.full_name}`")
     await message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_g(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Promote the latest local/failed voice entry via Gemini."""
+    if update.message is None:
+        return
+    if not is_authorized_chat(update, context):
+        return
+    message = update.message
+    gemini_api_key: str = context.application.bot_data["gemini_api_key"]
+    if not gemini_api_key:
+        await safe_reply(message, "GEMINI_API_KEY non configurata.")
+        return
+
+    store: EntryStore = context.application.bot_data["entry_store"]
+    entry = store.latest_promotable(chat_id=message.chat_id)
+    if entry is None:
+        await safe_reply(message, "Nessuna voce in attesa di Gemini.")
+        return
+
+    await safe_reply(message, f"⏳ Gemini su ultima voce (`{entry.id}`)…")
+    context.application.create_task(
+        promote_entry(context, entry.id, answer_chat_id=message.chat_id),
+        update=update,
+    )
+
+
+async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List promotable local/failed entries, each with its Gemini button."""
+    if update.message is None:
+        return
+    if not is_authorized_chat(update, context):
+        return
+    message = update.message
+    gemini_api_key: str = context.application.bot_data["gemini_api_key"]
+    if not gemini_api_key:
+        await safe_reply(message, "GEMINI_API_KEY non configurata.")
+        return
+
+    store: EntryStore = context.application.bot_data["entry_store"]
+    pending = store.list_pending(chat_id=message.chat_id)
+    if not pending:
+        await safe_reply(message, "Nessuna voce in attesa.")
+        return
+
+    await safe_reply(message, f"{len(pending)} voci in attesa:")
+    for entry in pending:
+        preview = (entry.transcript or "").strip().replace("\n", " ")
+        if len(preview) > 120:
+            preview = preview[:117] + "…"
+        label = preview or f"(vuota) {entry.id}"
+        status = entry.status
+        await message.reply_text(
+            f"`{entry.id}` [{status}]\n{label}",
+            reply_markup=gemini_keyboard(entry.id),
+            parse_mode="Markdown",
+        )
 
 
 async def handle_application_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

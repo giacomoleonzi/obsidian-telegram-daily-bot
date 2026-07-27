@@ -148,11 +148,18 @@ def load_bot_config() -> dict[str, object]:
         raise RuntimeError(f"Unsupported SUMMARY_PROVIDER: {summary_provider}")
 
     gemini_api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
-    if summary_provider == "gemini" and not gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY is required when SUMMARY_PROVIDER=gemini")
+    # Opt-in promotion only: key enables the Gemini button /g /pending.
+    # SUMMARY_PROVIDER is kept for backward-compatible env files but no longer
+    # triggers automatic cloud calls at voice capture (local-first).
 
     summary_prompt = load_prompt_file(required_env("GEMINI_SUMMARY_PROMPT_FILE"))
     task_prompt = load_prompt_file(required_env("GEMINI_TASK_PROMPT_FILE"))
+
+    state_db_raw = (os.getenv("BOT_STATE_DB_PATH") or "").strip()
+    if state_db_raw:
+        state_db_path = Path(state_db_raw)
+    else:
+        state_db_path = vault_path / ".bot" / "state.sqlite3"
 
     return {
         "token": token,
@@ -180,4 +187,5 @@ def load_bot_config() -> dict[str, object]:
         "gemini_model": required_env("GEMINI_MODEL"),
         "gemini_summary_prompt": summary_prompt,
         "gemini_task_prompt": task_prompt,
+        "state_db_path": state_db_path,
     }

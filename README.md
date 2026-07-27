@@ -28,18 +28,21 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Telegram plain text message ingestion.
 - Telegram document ingestion (including PDF).
 - `/whoami` command to verify Telegram `chat_id` and `user_id`.
+- `/g` promotes the latest local voice entry with Gemini (opt-in).
+- `/pending` lists unpromoted entries, each with a `🧠 Gemini` button.
 - Chat-level access control: accepts updates only from `AUTHORIZED_CHAT_ID`.
-- User feedback after save: bot replies with `✅` on success and `❌` on handler errors.
+- User feedback after save: `✅` when Gemini is disabled; transcript + inline button when `GEMINI_API_KEY` is set.
 - Configurable displayed timezone for note timestamps via `BOT_TIMEZONE`.
 - Local audio transcription via `whisper.cpp` (CPU).
-- Optional Gemini enrichment (two independent calls):
+- **Local-first Gemini opt-in**: cloud runs only on button tap / `/g` (never at capture).
   - `#### Riassunto` only when a summary is useful
   - `#### Task` with Obsidian checkboxes `- [ ]` when actions are present
-- With `SUMMARY_PROVIDER=local`, voice notes store transcript only (no summary, no tasks).
-- Daily note append workflow with media embed + transcript (+ optional sections).
+  - Per-entry Dataview field `processing:: local|cloud` plus HTML comment `<!-- entry:id -->`
+- Daily note append workflow with media embed + transcript (+ optional cloud sections).
 - Continuous Obsidian sync with `ob sync --continuous`.
 - Strict runtime configuration: missing required env vars fail fast.
 - Modular Python package under `bot/` (entrypoint: `python -m bot`); prompts live in Markdown under `config/prompts/`.
+- SQLite store under `{OB_VAULT_PATH}/.bot/state.sqlite3` for deferred buttons across restarts.
 
 ## Tech Stack
 
@@ -57,7 +60,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Docker and Docker Compose available on your machine
 - Telegram bot token from BotFather
 - Obsidian account with Sync enabled (for remote vault sync)
-- Gemini API key only if you set `SUMMARY_PROVIDER=gemini`
+- Gemini API key only if you want the opt-in `🧠 Gemini` button / `/g` / `/pending`
 
 ## Getting Started
 
@@ -74,7 +77,7 @@ cd obsidian-telegram
 cp config/.env.example config/.env
 ```
 
-Edit `config/.env` and set all required values. To enable summary/tasks, set `SUMMARY_PROVIDER=gemini` and `GEMINI_API_KEY`.
+Edit `config/.env` and set all required values. To enable opt-in Gemini promotion, set `GEMINI_API_KEY` (leave empty to keep fully local behaviour).
 
 ### 3) Build and start container
 
@@ -112,13 +115,14 @@ The container runs two supervised processes:
 
 ```mermaid
 flowchart TD
-  U[Telegram user] -->|Sends voice image text or file| TG[Telegram Bot API]
+  U[Telegram user] -->|Sends voice| TG[Telegram Bot API]
   TG --> BOT[bot package]
-  BOT --> MEDIA[Media folder from BOT_MEDIA_SUBDIR]
+  BOT --> MEDIA[Media folder]
   BOT --> STT[whisper-cli local transcription]
-  STT --> GEM[Gemini Call A summary and Call B tasks]
-  BOT --> NOTE[Daily note from BOT_DAILY_SUBDIR]
-  MEDIA --> NOTE
+  STT --> NOTE[Daily note local entry]
+  BOT -->|Reply transcript + button if key set| U
+  U -->|Tap Gemini or /g| GEM[Gemini Call A + Call B]
+  GEM --> NOTE
   NOTE --> VAULT[Vault at OB_VAULT_PATH]
   VAULT --> OBS[ob sync continuous]
   OBS --> REMOTE[Obsidian Sync remote vault]
@@ -126,9 +130,8 @@ flowchart TD
 
 Voice note sections in the daily note (order):
 
-1. Always: audio embed + `#### Trascrizione`
-2. Optional: `#### Riassunto` (Gemini Call A, only if useful)
-3. Optional: `#### Task` with `- [ ]` lines (Gemini Call B, only if tasks exist)
+1. Always at capture: audio embed + `processing:: local` + `#### Trascrizione`
+2. After opt-in Gemini: `processing:: cloud`, optional `#### Riassunto`, optional `#### Task`
 
 ## Configuration Reference
 
@@ -159,11 +162,12 @@ All runtime config comes from `config/.env` (loaded by Compose).
 | `STT_LANGUAGE` | yes | Whisper language code | `it` |
 | `WHISPER_CLI_PATH` | yes | Path to `whisper-cli` | `/usr/local/bin/whisper-cli` |
 | `WHISPER_MODEL_PATH` | yes | Path to GGML model | `/models/ggml-base.bin` |
-| `SUMMARY_PROVIDER` | yes | `local` (transcript only) or `gemini` (summary + tasks) | `local` |
-| `GEMINI_API_KEY` | conditional | Required if `SUMMARY_PROVIDER=gemini` | `AIza...` |
-| `GEMINI_MODEL` | yes | Gemini model name | `gemini-2.5-flash` |
+| `SUMMARY_PROVIDER` | yes | Legacy (ignored for auto-cloud); keep `local` | `local` |
+| `GEMINI_API_KEY` | no | If set, enables `🧠 Gemini` button, `/g`, `/pending` | empty |
+| `GEMINI_MODEL` | yes | Gemini model name | `gemini-3.5-flash-lite` |
 | `GEMINI_SUMMARY_PROMPT_FILE` | yes | Path to summary prompt Markdown | `config/prompts/summary.md` |
 | `GEMINI_TASK_PROMPT_FILE` | yes | Path to task-extraction prompt Markdown | `config/prompts/tasks.md` |
+| `BOT_STATE_DB_PATH` | no | SQLite for deferred promotion state | `{OB_VAULT_PATH}/.bot/state.sqlite3` |
 
 ## Gemini prompts
 
@@ -188,6 +192,12 @@ setup.sh
 
 # Verify Telegram identity in chat
 /whoami
+
+# Promote latest local voice entry (requires GEMINI_API_KEY)
+/g
+
+# List pending local entries with Gemini buttons
+/pending
 
 # Logs
 docker compose logs -f
@@ -222,11 +232,12 @@ docker compose down
 
 ### Gemini summary or tasks not appearing
 
-- Set `SUMMARY_PROVIDER=gemini` and a valid `GEMINI_API_KEY`.
+- Set a valid `GEMINI_API_KEY`, then tap `🧠 Gemini` on the transcript reply (or use `/g`).
 - Confirm prompt files exist at the paths in `GEMINI_SUMMARY_PROMPT_FILE` / `GEMINI_TASK_PROMPT_FILE`.
 - Rebuild/restart after changing env or prompt files.
 - Empty/`NONE` Gemini replies intentionally omit that section.
-- With `SUMMARY_PROVIDER=local`, voice notes never get summary or tasks.
+- Without `GEMINI_API_KEY`, the bot never calls the cloud (local-only).
+- Deferred taps need the SQLite store under `/vault/.bot/` (persists with the vault volume).
 
 ### Mermaid diagram not rendering on GitHub
 
@@ -246,11 +257,14 @@ docker compose down
 ├── bot/                   # package entrypoint: python -m bot
 │   ├── __main__.py
 │   ├── app.py
+│   ├── callbacks.py
 │   ├── config.py
 │   ├── gemini_enrichment.py
 │   ├── handlers.py
 │   ├── media.py
 │   ├── notes.py
+│   ├── promotion.py
+│   ├── store.py
 │   └── stt.py
 ├── Dockerfile
 ├── docker-compose.yml

@@ -5,6 +5,7 @@ config/.env
 vault/
 
 # Python
+.venv/
 __pycache__/
 *.py[cod]
 .Python
