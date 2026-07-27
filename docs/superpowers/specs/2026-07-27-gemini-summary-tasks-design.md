@@ -1,6 +1,7 @@
 # Gemini summary + Obsidian tasks (fase 1)
 
 Date: 2026-07-27  
+Revision: 2  
 Status: approved for implementation planning
 
 ## Goal
@@ -10,13 +11,13 @@ After local Whisper transcription of a Telegram voice message, optionally enrich
 1. A useful summary under `#### Riassunto` (only when worth it)
 2. Obsidian checkboxes under `#### Task` (only when tasks exist)
 
-Use two separate Gemini calls. Do not invent details. Omit empty sections.
+Use two separate Gemini calls. Load prompts from Markdown files referenced in config. Split the monolithic `bot.py` into a small reusable package. Do not invent details. Omit empty sections.
 
 ## Non-goals (this phase)
 
 - Structured JSON responses from Gemini
 - Local/offline AI summary or task extraction
-- Changes to image/text/document handlers
+- Changes to image/text/document handlers beyond moving code into modules
 - Auto-scripting of `ob login` / `ob sync-setup`
 
 ## Provider behavior
@@ -33,38 +34,62 @@ Voice message
   → download OGG
   → Whisper (local) → transcript
   → if provider == gemini:
-       Call A: summary prompt + transcript → optional summary text
-       Call B: task prompt + transcript → optional task lines
+       Call A: summary prompt file + transcript → optional summary text
+       Call B: task prompt file + transcript → optional task lines
   → append markdown to daily note
 ```
 
 Calls A and B are independent: one failure must not block the other.
 
-## Components
+## Prompt files
 
-### `bot.py`
+Prompts live as well-written Markdown under `config/prompts/`:
 
-- Replace single `_gemini_summary` usage with two Gemini helpers (or one shared caller with different prompts):
-  - summary call
-  - task call
-- Parse/normalize responses:
-  - empty / whitespace / `NONE` → treat as no content
-  - task lines: prefer `- [ ] ...`; if Gemini returns plain bullets (`- ...`), normalize to `- [ ] ...` when reasonable; drop non-task lines
-- Update `_voice_entry_markdown` to accept optional `summary` and `tasks` and omit missing sections
-- When `SUMMARY_PROVIDER=local`, do not call `_local_extractive_summary` for voice entries (remove that path from voice handling)
-- Keep existing startup guard: `GEMINI_API_KEY` required if provider is `gemini`
+| File | Purpose |
+|---|---|
+| `config/prompts/summary.md` | Instructions for Call A (summary) |
+| `config/prompts/tasks.md` | Instructions for Call B (Obsidian tasks) |
 
-### `config/.env.example`
+Env points to file paths (not inline prompt text):
 
-- Document two prompts:
-  - `GEMINI_SUMMARY_PROMPT`
-  - `GEMINI_TASK_PROMPT` (new)
-- Keep `GEMINI_API_KEY`, `GEMINI_MODEL` shared by both calls
-- Clarify that `local` means transcript-only for voice
+```env
+GEMINI_SUMMARY_PROMPT_FILE=config/prompts/summary.md
+GEMINI_TASK_PROMPT_FILE=config/prompts/tasks.md
+```
 
-### README (minimal)
+- Paths are resolved relative to the app working directory (`/app` in the container) unless absolute.
+- Prompt files are loaded at startup; missing/empty files fail fast.
+- Remove `GEMINI_SUMMARY_PROMPT` from config (replaced by file reference).
 
-- Update summary/task behavior to match this design
+Prompt content contract:
+
+- Summary: practical Italian bullets only if useful; otherwise reply `NONE`; do not invent details.
+- Tasks: concrete actions as `- [ ] ...`; explicit and clearly implied tasks; otherwise `NONE`; no commentary outside task lines.
+
+## Package layout
+
+Keep a thin `bot.py` stub so supervisord and healthcheck stay on `bot.py`. Move logic into package `bot/`:
+
+```text
+bot.py                      # stub → bot.app.main()
+bot/
+  __init__.py
+  app.py                    # Application wiring / main()
+  config.py                 # env loading + prompt file loading
+  stt.py                    # ffmpeg + whisper
+  gemini_enrichment.py      # two Gemini calls + NONE/task normalize
+  notes.py                  # markdown entries + atomic daily append
+  media.py                  # image compression helpers
+  handlers.py               # Telegram handlers
+config/
+  prompts/
+    summary.md
+    tasks.md
+```
+
+Dockerfile must `COPY` `bot.py`, `bot/`, and `config/prompts/`.
+
+`.cursorrules` preferred edit surface: `Dockerfile`, `bot.py`, `bot/`, and `config/`.
 
 ## Markdown format
 
@@ -90,26 +115,18 @@ Calls A and B are independent: one failure must not block the other.
 
 `#### Riassunto` and `#### Task` appear only when their respective call produced content.
 
-## Default prompts (Italian, editable via env)
-
-**Summary**
-
-- Summarize in practical Italian bullets only if the summary adds value beyond the raw transcript.
-- If not worth summarizing, reply with exactly `NONE`.
-- Do not invent details.
-
-**Tasks**
-
-- Extract concrete actionable items as Obsidian checkboxes: `- [ ] ...`
-- Include explicit and clearly implied tasks (e.g. “metti un task di comprare il latte”).
-- No commentary outside task lines.
-- If there are no tasks, reply with exactly `NONE`.
-
 ## Error handling
 
 - Network/API/exception on Call A or B: log the error; skip that section; continue.
 - Both empty/failed: note still has audio + transcription.
-- Invalid `SUMMARY_PROVIDER` or missing key for gemini: fail at startup (existing pattern).
+- Invalid `SUMMARY_PROVIDER`, missing Gemini key (when provider is gemini), or missing prompt files: fail at startup.
+
+## Documentation updates (this revision)
+
+- README: features, mermaid flow, config table, structure, Gemini troubleshooting
+- `config/.env.example`: prompt file vars; clarify `local` = transcript-only
+- `.cursorrules`: include `bot/` and prompt files under `config/`
+- Design spec: this revision 2
 
 ## Testing / verification
 
@@ -118,7 +135,4 @@ Calls A and B are independent: one failure must not block the other.
 - Voice with explicit “metti un task …”: `#### Task` with `- [ ] ...`.
 - Short trivial audio: may omit both optional sections.
 - Simulate one Gemini call failure: other section still written when successful.
-
-## Out of scope follow-ups
-
-JSON-structured Gemini responses can be considered later; not part of this design or implementation plan.
+- Container starts with prompt files present; fails fast if a prompt path is wrong.

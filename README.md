@@ -14,6 +14,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - [Getting Started](#getting-started)
 - [How It Works](#how-it-works)
 - [Configuration Reference](#configuration-reference)
+- [Gemini prompts](#gemini-prompts)
 - [Available Commands](#available-commands)
 - [Troubleshooting](#troubleshooting)
 - [Security Notes](#security-notes)
@@ -31,12 +32,14 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - User feedback after save: bot replies with `✅` on success and `❌` on handler errors.
 - Configurable displayed timezone for note timestamps via `BOT_TIMEZONE`.
 - Local audio transcription via `whisper.cpp` (CPU).
-- Summary generation:
-  - local extractive summary
-  - optional Gemini summary
-- Daily note append workflow with media embed + transcript + summary.
+- Optional Gemini enrichment (two independent calls):
+  - `#### Riassunto` only when a summary is useful
+  - `#### Task` with Obsidian checkboxes `- [ ]` when actions are present
+- With `SUMMARY_PROVIDER=local`, voice notes store transcript only (no summary, no tasks).
+- Daily note append workflow with media embed + transcript (+ optional sections).
 - Continuous Obsidian sync with `ob sync --continuous`.
 - Strict runtime configuration: missing required env vars fail fast.
+- Modular Python package under `bot/`; prompts live in Markdown under `config/prompts/`.
 
 ## Tech Stack
 
@@ -44,7 +47,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - **Bot Framework**: `python-telegram-bot`
 - **Transcription**: `whisper.cpp` (`whisper-cli`)
 - **Image handling**: Pillow
-- **Optional AI summary**: `google-genai`
+- **Optional AI enrichment**: `google-genai` (Gemini)
 - **Process manager**: Supervisor
 - **Container runtime**: Docker + Docker Compose
 - **Obsidian sync**: `obsidian-headless` CLI
@@ -54,6 +57,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Docker and Docker Compose available on your machine
 - Telegram bot token from BotFather
 - Obsidian account with Sync enabled (for remote vault sync)
+- Gemini API key only if you set `SUMMARY_PROVIDER=gemini`
 
 ## Getting Started
 
@@ -70,7 +74,7 @@ cd obsidian-telegram
 cp config/.env.example config/.env
 ```
 
-Edit `config/.env` and set all required values.
+Edit `config/.env` and set all required values. To enable summary/tasks, set `SUMMARY_PROVIDER=gemini` and `GEMINI_API_KEY`.
 
 ### 3) Build and start container
 
@@ -101,7 +105,7 @@ docker compose logs -f
 
 The container runs two supervised processes:
 
-- `python /app/bot.py`
+- `python /app/bot.py` (thin entrypoint into the `bot/` package)
 - `ob sync --continuous --path /vault`
 
 `./vault:/vault` is bind-mounted so your notes, media, and Obsidian auth state persist.
@@ -109,16 +113,22 @@ The container runs two supervised processes:
 ```mermaid
 flowchart TD
   U[Telegram user] -->|Sends voice image text or file| TG[Telegram Bot API]
-  TG --> BOT[bot.py]
+  TG --> BOT[bot package]
   BOT --> MEDIA[Media folder from BOT_MEDIA_SUBDIR]
   BOT --> STT[whisper-cli local transcription]
-  STT --> SUM[Local summary or Gemini summary]
+  STT --> GEM[Gemini Call A summary and Call B tasks]
   BOT --> NOTE[Daily note from BOT_DAILY_SUBDIR]
   MEDIA --> NOTE
   NOTE --> VAULT[Vault at OB_VAULT_PATH]
-  VAULT --> OBS[ob sync --continuous]
+  VAULT --> OBS[ob sync continuous]
   OBS --> REMOTE[Obsidian Sync remote vault]
 ```
+
+Voice note sections in the daily note (order):
+
+1. Always: audio embed + `#### Trascrizione`
+2. Optional: `#### Riassunto` (Gemini Call A, only if useful)
+3. Optional: `#### Task` with `- [ ]` lines (Gemini Call B, only if tasks exist)
 
 ## Configuration Reference
 
@@ -149,10 +159,20 @@ All runtime config comes from `config/.env` (loaded by Compose).
 | `STT_LANGUAGE` | yes | Whisper language code | `it` |
 | `WHISPER_CLI_PATH` | yes | Path to `whisper-cli` | `/usr/local/bin/whisper-cli` |
 | `WHISPER_MODEL_PATH` | yes | Path to GGML model | `/models/ggml-base.bin` |
-| `SUMMARY_PROVIDER` | yes | `local` or `gemini` | `local` |
+| `SUMMARY_PROVIDER` | yes | `local` (transcript only) or `gemini` (summary + tasks) | `local` |
 | `GEMINI_API_KEY` | conditional | Required if `SUMMARY_PROVIDER=gemini` | `AIza...` |
 | `GEMINI_MODEL` | yes | Gemini model name | `gemini-2.5-flash` |
-| `GEMINI_SUMMARY_PROMPT` | yes | Prompt for Gemini summary | `Summarize...` |
+| `GEMINI_SUMMARY_PROMPT_FILE` | yes | Path to summary prompt Markdown | `config/prompts/summary.md` |
+| `GEMINI_TASK_PROMPT_FILE` | yes | Path to task-extraction prompt Markdown | `config/prompts/tasks.md` |
+
+## Gemini prompts
+
+Edit the Markdown files (not long env strings):
+
+- [`config/prompts/summary.md`](config/prompts/summary.md) — when to summarize, format, `NONE` if not worth it
+- [`config/prompts/tasks.md`](config/prompts/tasks.md) — Obsidian `- [ ]` extraction, `NONE` if no tasks
+
+Point to them from `.env` via `GEMINI_SUMMARY_PROMPT_FILE` and `GEMINI_TASK_PROMPT_FILE`. Paths are relative to `/app` inside the container unless absolute.
 
 ## Available Commands
 
@@ -200,10 +220,13 @@ docker compose down
 - Set `BOT_TIMEZONE` in `config/.env` (example: `Europe/Rome`).
 - Restart container after changing env values.
 
-### Gemini summary not working
+### Gemini summary or tasks not appearing
 
-- Set `SUMMARY_PROVIDER=gemini`.
-- Set valid `GEMINI_API_KEY`.
+- Set `SUMMARY_PROVIDER=gemini` and a valid `GEMINI_API_KEY`.
+- Confirm prompt files exist at the paths in `GEMINI_SUMMARY_PROMPT_FILE` / `GEMINI_TASK_PROMPT_FILE`.
+- Rebuild/restart after changing env or prompt files.
+- Empty/`NONE` Gemini replies intentionally omit that section.
+- With `SUMMARY_PROVIDER=local`, voice notes never get summary or tasks.
 
 ### Mermaid diagram not rendering on GitHub
 
@@ -220,14 +243,20 @@ docker compose down
 
 ```text
 .
-├── bot.py
+├── bot.py                 # thin entrypoint
+├── bot/                   # package (handlers, STT, Gemini, notes, …)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── config/
 │   ├── .env.example
+│   ├── prompts/
+│   │   ├── summary.md
+│   │   └── tasks.md
 │   ├── setup.sh
 │   └── supervisord.conf
-├── vault/                # local bind mount target (ignored)
+├── docs/
+│   └── superpowers/specs/
+├── vault/                 # local bind mount target (ignored)
 └── README.md
 ```
 

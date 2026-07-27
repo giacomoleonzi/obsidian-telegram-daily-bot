@@ -1,6 +1,6 @@
 # Obsidian + Telegram Docker setup (Pi / ARM64)
 
-When you work on this project, prefer modifying `Dockerfile`, `bot.py`, and files under `config/` only.
+When you work on this project, prefer modifying `Dockerfile`, `bot.py`, `bot/`, and files under `config/` only (including `config/prompts/*.md`).
 
 ## One-time `ob login` / `ob sync-setup` in Cursor
 
@@ -18,4 +18,3 @@ When you work on this project, prefer modifying `Dockerfile`, `bot.py`, and file
    - If it asks for an encryption password/device confirmation, enter it interactively.
 
 Never attempt to “auto-script” `ob login` / `ob sync-setup` beyond prompting for user input.
-
