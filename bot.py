@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sync import ALLOWED_SYNC_PROVIDERS, DropboxSyncProvider, ObsidianSyncProvider, SyncProvider
+
 from PIL import Image, ImageOps
 from telegram import Update
 from telegram.error import Conflict
@@ -280,6 +282,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     gemini_model: str = context.application.bot_data["gemini_model"]
     gemini_prompt: str = context.application.bot_data["gemini_prompt"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+    sync_provider: SyncProvider = context.application.bot_data["sync_provider"]
     timezone_name: str = context.application.bot_data["timezone_name"]
 
     message_dt = _message_dt_local(message.date, timezone_name)
@@ -324,6 +327,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await _append_to_daily_note(note_path, entry, note_lock, message_dt)
         logging.info("Updated daily note with audio: %s", note_path)
+        daily_subdir_str: str = context.application.bot_data["daily_subdir"]
+        await sync_provider.upload_file(ogg_path, f"{media_subdir}/{ogg_path.name}")
+        await sync_provider.upload_file(note_path, f"{daily_subdir_str}/{note_path.name}")
         await _safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing voice message")
@@ -364,6 +370,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     image_quality_step: int = context.application.bot_data["image_quality_step"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
     timezone_name: str = context.application.bot_data["timezone_name"]
+    sync_provider: SyncProvider = context.application.bot_data["sync_provider"]
 
     message_dt = _message_dt_local(message.date, timezone_name)
     stem = f"{_timestamp_id(message_dt)}_{_safe_stem(str(unique_id))}"
@@ -401,6 +408,9 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await _append_to_daily_note(note_path, entry, note_lock, message_dt)
         logging.info("Updated daily note with image: %s", note_path)
+        daily_subdir_str: str = context.application.bot_data["daily_subdir"]
+        await sync_provider.upload_file(image_path, f"{media_subdir}/{image_path.name}")
+        await sync_provider.upload_file(note_path, f"{daily_subdir_str}/{note_path.name}")
         await _safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing image message")
@@ -420,6 +430,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     daily_dir: Path = context.application.bot_data["daily_dir"]
     note_pattern: str = context.application.bot_data["daily_note_format"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+    sync_provider: SyncProvider = context.application.bot_data["sync_provider"]
     timezone_name: str = context.application.bot_data["timezone_name"]
 
     message_dt = _message_dt_local(message.date, timezone_name)
@@ -429,6 +440,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         entry = _text_entry_markdown(message_dt=message_dt, text=text)
         await _append_to_daily_note(note_path, entry, note_lock, message_dt)
         logging.info("Updated daily note with text: %s", note_path)
+        daily_subdir_str: str = context.application.bot_data["daily_subdir"]
+        await sync_provider.upload_file(note_path, f"{daily_subdir_str}/{note_path.name}")
         await _safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing text message")
@@ -454,6 +467,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     media_subdir: str = context.application.bot_data["media_subdir"]
     note_pattern: str = context.application.bot_data["daily_note_format"]
     note_lock: asyncio.Lock = context.application.bot_data["note_lock"]
+    sync_provider: SyncProvider = context.application.bot_data["sync_provider"]
     timezone_name: str = context.application.bot_data["timezone_name"]
 
     message_dt = _message_dt_local(message.date, timezone_name)
@@ -477,6 +491,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         await _append_to_daily_note(note_path, entry, note_lock, message_dt)
         logging.info("Updated daily note with file: %s", note_path)
+        daily_subdir_str: str = context.application.bot_data["daily_subdir"]
+        await sync_provider.upload_file(doc_path, f"{media_subdir}/{doc_path.name}")
+        await sync_provider.upload_file(note_path, f"{daily_subdir_str}/{note_path.name}")
         await _safe_reply(message, "✅")
     except Exception:
         logging.exception("Failed processing document message")
@@ -537,6 +554,21 @@ def _load_bot_config() -> dict[str, object]:
     daily_dir = vault_path / daily_subdir
     media_dir = vault_path / media_subdir
 
+    sync_provider_name = (os.getenv("SYNC_PROVIDER") or "obsidian").lower()
+    if sync_provider_name not in ALLOWED_SYNC_PROVIDERS:
+        raise RuntimeError(f"Unsupported SYNC_PROVIDER: {sync_provider_name}")
+
+    sync_provider: SyncProvider
+    if sync_provider_name == "dropbox":
+        sync_provider = DropboxSyncProvider(
+            app_key=_required_env("DROPBOX_APP_KEY"),
+            app_secret=_required_env("DROPBOX_APP_SECRET"),
+            refresh_token=_required_env("DROPBOX_REFRESH_TOKEN"),
+            base_path=_required_env("DROPBOX_BASE_PATH"),
+        )
+    else:
+        sync_provider = ObsidianSyncProvider()
+
     log_level = _required_env("BOT_LOG_LEVEL").upper()
     valid_levels = set(logging.getLevelNamesMapping().keys())
     if log_level not in valid_levels:
@@ -578,6 +610,8 @@ def _load_bot_config() -> dict[str, object]:
         "daily_dir": daily_dir,
         "media_dir": media_dir,
         "media_subdir": str(media_subdir),
+        "daily_subdir": str(daily_subdir),
+        "sync_provider": sync_provider,
         "daily_note_format": daily_note_format,
         "log_level": log_level,
         "note_template": note_template,
@@ -614,6 +648,15 @@ def main() -> None:
     application = Application.builder().token(str(config["token"])).build()
     application.bot_data.update(config)
     application.bot_data["note_lock"] = asyncio.Lock()
+
+    async def _post_init(app: Application) -> None:
+        await app.bot_data["sync_provider"].start()
+
+    async def _post_shutdown(app: Application) -> None:
+        await app.bot_data["sync_provider"].stop()
+
+    application.post_init = _post_init
+    application.post_shutdown = _post_shutdown
     application.add_handler(CommandHandler("whoami", cmd_whoami))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))

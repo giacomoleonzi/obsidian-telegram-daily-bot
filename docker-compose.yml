@@ -9,6 +9,8 @@ services:
     restart: unless-stopped
     env_file:
       - ./config/.env
+    environment:
+      - OB_SYNC_AUTOSTART=${OB_SYNC_AUTOSTART:-true}
     volumes:
       - ./vault:/vault
     healthcheck:
