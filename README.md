@@ -31,7 +31,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - `/g` promotes the latest local voice entry with Gemini (opt-in).
 - `/pending` lists unpromoted entries, each with a `🧠 Gemini` button.
 - Chat-level access control: accepts updates only from `AUTHORIZED_CHAT_ID`.
-- User feedback after save: `✅` when Gemini is disabled; transcript + inline button when `GEMINI_API_KEY` is set.
+- User feedback after save: `✅` always; with `GEMINI_API_KEY` the same ack includes the `🧠 Gemini` inline button (transcript stays in the note only).
 - Configurable displayed timezone for note timestamps via `BOT_TIMEZONE`.
 - Local audio transcription via `whisper.cpp` (CPU).
 - **Local-first Gemini opt-in**: cloud runs only on button tap / `/g` (never at capture).

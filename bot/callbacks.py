@@ -10,7 +10,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.handlers import is_authorized_chat
-from bot.promotion import format_local_reply, promote_entry
+from bot.promotion import promote_entry
 from bot.store import EntryStore, STATUS_CLOUD, STATUS_PROCESSING
 
 _CALLBACK_RE = re.compile(r"^g:([A-Za-z0-9_-]{4,16})$")
@@ -52,7 +52,7 @@ async def handle_gemini_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer("Elaboro con Gemini…")
     try:
         await query.edit_message_text(
-            text=format_local_reply(entry.transcript) + "\n\n⏳ Gemini in corso…",
+            text="⏳ Gemini in corso…",
             reply_markup=None,
         )
     except Exception:

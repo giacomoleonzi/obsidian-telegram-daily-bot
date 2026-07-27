@@ -30,15 +30,14 @@ def truncate_telegram(text: str, limit: int = 3500) -> str:
     return text[: limit - 20].rstrip() + "\n…(troncato)"
 
 
-def format_local_reply(transcript: str) -> str:
-    """User-visible reply after local transcription."""
-    body = truncate_telegram(transcript)
-    return f"📝 Trascrizione\n\n{body}"
+def format_local_reply() -> str:
+    """User-visible reply after local transcription (no transcript echo)."""
+    return "✅"
 
 
-def format_cloud_reply(transcript: str, summary: str | None, tasks: str | None) -> str:
-    """User-visible reply after successful Gemini promotion."""
-    parts = ["☁️ Gemini", "", "📝 Trascrizione", truncate_telegram(transcript, 2000)]
+def format_cloud_reply(summary: str | None, tasks: str | None) -> str:
+    """User-visible reply after successful Gemini promotion (no transcript echo)."""
+    parts = ["☁️ Gemini"]
     if summary:
         parts.extend(["", "#### Riassunto", summary.strip()])
     if tasks:
@@ -112,7 +111,7 @@ async def _notify_success(
     summary: str | None,
     tasks: str | None,
 ) -> None:
-    text = format_cloud_reply(entry.transcript, summary, tasks)
+    text = format_cloud_reply(summary, tasks)
     if entry.telegram_message_id is not None:
         try:
             await context.bot.edit_message_text(
@@ -138,7 +137,7 @@ async def _notify_failure(
     answer_chat_id: int | None,
 ) -> None:
     short = error.strip().splitlines()[0][:200] if error else "errore sconosciuto"
-    text = format_local_reply(entry.transcript) + f"\n\n❌ Gemini: {short}"
+    text = f"{format_local_reply()}\n\n❌ Gemini: {short}"
     markup = gemini_keyboard(entry.id)
     if entry.telegram_message_id is not None:
         try:

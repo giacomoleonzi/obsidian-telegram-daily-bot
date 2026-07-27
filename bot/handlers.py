@@ -120,7 +120,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 entry_id=entry_id,
             )
             sent = await message.reply_text(
-                format_local_reply(transcription),
+                format_local_reply(),
                 reply_markup=gemini_keyboard(entry_id),
             )
             store.set_telegram_message_id(entry_id, sent.message_id)

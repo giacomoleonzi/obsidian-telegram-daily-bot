@@ -14,17 +14,19 @@ def test_truncate_telegram() -> None:
     assert out.endswith("…(troncato)") or "troncato" in out
 
 
-def test_format_local_reply_contains_transcript() -> None:
-    text = format_local_reply("ciao dal pi")
-    assert "ciao dal pi" in text
-    assert "Trascrizione" in text
+def test_format_local_reply_is_ack_only() -> None:
+    text = format_local_reply()
+    assert text == "✅"
+    assert "Trascrizione" not in text
 
 
 def test_format_cloud_reply_sections() -> None:
-    text = format_cloud_reply("base", summary="- a", tasks="- [ ] b")
+    text = format_cloud_reply(summary="- a", tasks="- [ ] b")
     assert "Gemini" in text
     assert "- a" in text
     assert "- [ ] b" in text
+    assert "Trascrizione" not in text
+    assert "base" not in text
 
 
 def test_gemini_keyboard_callback_data() -> None:
