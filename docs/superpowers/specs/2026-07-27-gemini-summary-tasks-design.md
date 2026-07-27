@@ -68,12 +68,12 @@ Prompt content contract:
 
 ## Package layout
 
-Keep a thin `bot.py` stub so supervisord and healthcheck stay on `bot.py`. Move logic into package `bot/`:
+Use package `bot/` with `python -u -m bot` as entrypoint (avoids `bot.py` / `bot/` import shadowing):
 
 ```text
-bot.py                      # stub → bot.app.main()
 bot/
   __init__.py
+  __main__.py               # python -m bot → app.main()
   app.py                    # Application wiring / main()
   config.py                 # env loading + prompt file loading
   stt.py                    # ffmpeg + whisper
@@ -87,9 +87,9 @@ config/
     tasks.md
 ```
 
-Dockerfile must `COPY` `bot.py`, `bot/`, and `config/prompts/`.
+Dockerfile must `COPY` `bot/` and `config/prompts/`. Supervisord runs `python -u -m bot`.
 
-`.cursorrules` preferred edit surface: `Dockerfile`, `bot.py`, `bot/`, and `config/`.
+`.cursorrules` preferred edit surface: `Dockerfile`, `bot/`, and `config/`.
 
 ## Markdown format
 

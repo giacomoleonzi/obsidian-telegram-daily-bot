@@ -1,6 +1,6 @@
 # Obsidian + Telegram Docker setup (Pi / ARM64)
 
-When you work on this project, prefer modifying `Dockerfile`, `bot.py`, `bot/`, and files under `config/` only (including `config/prompts/*.md`).
+When you work on this project, prefer modifying `Dockerfile`, `bot/`, and files under `config/` only (including `config/prompts/*.md`).
 
 ## One-time `ob login` / `ob sync-setup` in Cursor
 

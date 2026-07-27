@@ -39,7 +39,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Daily note append workflow with media embed + transcript (+ optional sections).
 - Continuous Obsidian sync with `ob sync --continuous`.
 - Strict runtime configuration: missing required env vars fail fast.
-- Modular Python package under `bot/`; prompts live in Markdown under `config/prompts/`.
+- Modular Python package under `bot/` (entrypoint: `python -m bot`); prompts live in Markdown under `config/prompts/`.
 
 ## Tech Stack
 
@@ -105,7 +105,7 @@ docker compose logs -f
 
 The container runs two supervised processes:
 
-- `python /app/bot.py` (thin entrypoint into the `bot/` package)
+- `python -u -m bot`
 - `ob sync --continuous --path /vault`
 
 `./vault:/vault` is bind-mounted so your notes, media, and Obsidian auth state persist.
@@ -243,8 +243,15 @@ docker compose down
 
 ```text
 .
-├── bot.py                 # thin entrypoint
-├── bot/                   # package (handlers, STT, Gemini, notes, …)
+├── bot/                   # package entrypoint: python -m bot
+│   ├── __main__.py
+│   ├── app.py
+│   ├── config.py
+│   ├── gemini_enrichment.py
+│   ├── handlers.py
+│   ├── media.py
+│   ├── notes.py
+│   └── stt.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── config/
@@ -255,7 +262,7 @@ docker compose down
 │   ├── setup.sh
 │   └── supervisord.conf
 ├── docs/
-│   └── superpowers/specs/
+│   └── superpowers/
 ├── vault/                 # local bind mount target (ignored)
 └── README.md
 ```
