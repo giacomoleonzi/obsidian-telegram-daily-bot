@@ -7,11 +7,38 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from bot.note_templates import configure_note_templates, default_templates_dir
 from bot.notes import (
     append_to_daily_note_sync,
+    text_entry_markdown,
     update_voice_entry_cloud,
     voice_entry_markdown,
 )
+
+configure_note_templates(default_templates_dir())
+
+
+def test_text_entry_compact_no_timezone() -> None:
+    dt = datetime(2026, 10, 28, 18, 30, 47, tzinfo=ZoneInfo("UTC"))
+    md = text_entry_markdown(message_dt=dt, text="Sicofansia")
+    assert md == "### Text 18:30:47\nSicofansia\n"
+
+
+def test_append_block_matches_expected_layout(tmp_path: Path) -> None:
+    dt = datetime(2026, 10, 28, 18, 30, 47, tzinfo=ZoneInfo("UTC"))
+    note = tmp_path / "2026-10-28.md"
+    entry = text_entry_markdown(message_dt=dt, text="Sicofansia")
+    append_to_daily_note_sync(note, entry, dt)
+    text = note.read_text(encoding="utf-8")
+    assert text == (
+        "# Daily 2026-10-28\n"
+        "\n"
+        "---\n"
+        "\n"
+        "2026-10-28 18:30:47\n"
+        "### Text 18:30:47\n"
+        "Sicofansia\n"
+    )
 
 
 def test_voice_entry_transcript_only() -> None:
@@ -28,6 +55,7 @@ def test_voice_entry_transcript_only() -> None:
     assert "ciao mondo" in md
     assert "#### Riassunto" not in md
     assert "#### Task" not in md
+    assert "UTC" not in md
 
 
 def test_voice_entry_with_summary_and_tasks() -> None:
@@ -79,7 +107,6 @@ def test_update_voice_entry_cloud_preserves_other_entries(tmp_path: Path) -> Non
     assert "seconda" in text
     assert "<!-- entry:111111 -->" in text
     assert "<!-- entry:222222 -->" in text
-    # Only first entry promoted
     idx1 = text.index("<!-- entry:111111 -->")
     idx2 = text.index("<!-- entry:222222 -->")
     block1 = text[idx1:idx2]

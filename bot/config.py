@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from bot.note_templates import configure_note_templates, default_templates_dir
 from sync import ALLOWED_SYNC_PROVIDERS, DropboxSyncProvider, ObsidianSyncProvider, SyncProvider
 
 ALLOWED_STT_PROVIDERS: Final[set[str]] = {"local"}
@@ -178,6 +179,10 @@ def load_bot_config() -> dict[str, object]:
     else:
         state_db_path = vault_path / ".bot" / "state.sqlite3"
 
+    templates_dir_raw = (os.getenv("BOT_TEMPLATES_DIR") or "").strip()
+    templates_dir = Path(templates_dir_raw) if templates_dir_raw else default_templates_dir()
+    templates_dir = configure_note_templates(templates_dir)
+
     return {
         "token": token,
         "authorized_chat_id": authorized_chat_id,
@@ -207,4 +212,5 @@ def load_bot_config() -> dict[str, object]:
         "gemini_summary_prompt": summary_prompt,
         "gemini_task_prompt": task_prompt,
         "state_db_path": state_db_path,
+        "templates_dir": templates_dir,
     }

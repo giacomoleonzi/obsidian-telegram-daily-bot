@@ -55,6 +55,7 @@ WORKDIR /app
 COPY bot/ /app/bot/
 COPY sync.py /app/sync.py
 COPY config/prompts/ /app/config/prompts/
+COPY config/templates/ /app/config/templates/
 COPY config/setup.sh /usr/local/bin/setup.sh
 COPY config/supervisord.conf /etc/supervisor/supervisord.conf
 

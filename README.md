@@ -43,6 +43,7 @@ Repository: [https://github.com/giacomoleonzi/obsidian-telegram-daily-bot](https
 - Continuous Obsidian sync with `ob sync --continuous`, or Dropbox upload sync.
 - Strict runtime configuration: missing required env vars fail fast.
 - Modular Python package under `bot/` (entrypoint: `python -m bot`); prompts live in Markdown under `config/prompts/`.
+- Daily-note layouts as editable Jinja2 templates under `config/templates/`.
 - SQLite store under `{OB_VAULT_PATH}/.bot/state.sqlite3` for deferred buttons across restarts.
 
 ## Tech Stack
@@ -171,6 +172,7 @@ All runtime config comes from `config/.env` (loaded by Compose).
 | `BOT_LOG_LEVEL` | yes | Python log level | `INFO` |
 | `BOT_NOTE_TEMPLATE` | yes | Audio embed template (`{audio_file}` required) | `![[{audio_file}]]` |
 | `BOT_IMAGE_NOTE_TEMPLATE` | yes | Image embed template (`{image_file}` required) | `![[{image_file}]]` |
+| `BOT_TEMPLATES_DIR` | no | Jinja2 daily-note templates directory | `config/templates` |
 | `IMAGE_COMPRESSION_ENABLED` | yes | Enable image compression | `true` |
 | `IMAGE_MAX_BYTES` | yes | Target max image size | `5242880` |
 | `IMAGE_MAX_DIMENSION` | yes | Max width/height during compression | `2560` |
@@ -202,6 +204,21 @@ Edit the Markdown files (not long env strings):
 - [`config/prompts/tasks.md`](config/prompts/tasks.md) — Obsidian `- [ ]` extraction, `NONE` if no tasks
 
 Point to them from `.env` via `GEMINI_SUMMARY_PROMPT_FILE` and `GEMINI_TASK_PROMPT_FILE`. Paths are relative to `/app` inside the container unless absolute.
+
+## Note templates (Jinja2)
+
+Edit Markdown layouts in [`config/templates/`](config/templates/) (no Python changes needed for spacing/headings):
+
+| File | Purpose |
+|---|---|
+| `daily_header.md.j2` | Created once when the daily note is new |
+| `block.md.j2` | `---` separator + timestamp wrapper around each entry |
+| `text.md.j2` | Plain text messages |
+| `voice.md.j2` | Voice notes (transcript / optional summary & tasks) |
+| `image.md.j2` | Images |
+| `document.md.j2` | Files |
+
+Override the directory with `BOT_TEMPLATES_DIR` if needed. Restart the container after edits.
 
 ## Available Commands
 
@@ -299,6 +316,7 @@ docker compose down
 │   ├── prompts/
 │   │   ├── summary.md
 │   │   └── tasks.md
+│   ├── templates/         # Jinja2 daily-note layouts (*.md.j2)
 │   ├── setup.sh
 │   └── supervisord.conf
 ├── scripts/

@@ -1,0 +1,14 @@
+### Audio {{ time }}
+<!-- entry:{{ entry_id }} -->
+processing:: {{ status }}
+{{ audio_embed }}
+#### Trascrizione
+{{ transcript }}
+{% if summary %}
+#### Riassunto
+{{ summary }}
+{% endif %}
+{% if tasks %}
+#### Task
+{{ tasks }}
+{% endif %}
