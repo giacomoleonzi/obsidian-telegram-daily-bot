@@ -30,12 +30,19 @@ def test_append_block_matches_expected_layout(tmp_path: Path) -> None:
     entry = text_entry_markdown(message_dt=dt, text="Sicofansia")
     append_to_daily_note_sync(note, entry, dt)
     text = note.read_text(encoding="utf-8")
-    # Blank line before --- so MD does not treat it as a Setext heading.
-    assert "\n\n---\n\n2026-10-28 18:30:47\n### Text 18:30:47\nSicofansia\n" in text
-    assert text.startswith("# Daily 2026-10-28\n")
+    assert text == (
+        "# Daily 2026-10-28\n"
+        "\n"
+        "---\n"
+        "\n"
+        "2026-10-28 18:30:47\n"
+        "### Text 18:30:47\n"
+        "Sicofansia\n"
+    )
+    assert "UTC" not in text
 
 
-def test_second_append_has_blank_line_before_separator(tmp_path: Path) -> None:
+def test_second_append_has_exactly_one_blank_line_before_separator(tmp_path: Path) -> None:
     dt = datetime(2026, 10, 28, 18, 30, 47, tzinfo=ZoneInfo("UTC"))
     note = tmp_path / "2026-10-28.md"
     append_to_daily_note_sync(note, text_entry_markdown(dt, "prima"), dt)
@@ -46,6 +53,7 @@ def test_second_append_has_blank_line_before_separator(tmp_path: Path) -> None:
     )
     text = note.read_text(encoding="utf-8")
     assert "prima\n\n---\n\n2026-10-28 18:31:47\n### Text 18:31:47\nseconda\n" in text
+    assert "\n\n\n---" not in text
 
 
 def test_voice_entry_transcript_only() -> None:

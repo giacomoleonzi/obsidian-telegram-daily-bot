@@ -245,31 +245,41 @@ def _atomic_write_text(path: Path, text: str) -> None:
     Path(tmp_name).replace(path)
 
 
+def _blank_line_before_separator(existing: str) -> str:
+    """Return the exact prefix needed so ``---`` is preceded by one blank line.
+
+    Markdown needs a blank line before ``---`` (thematic break). Avoid stacking
+    extra blank lines that create large gaps in Obsidian.
+    """
+    if not existing:
+        return ""
+    if existing.endswith("\n\n"):
+        return ""
+    if existing.endswith("\n"):
+        return "\n"
+    return "\n\n"
+
+
 def append_to_daily_note_sync(note_path: Path, entry: str, note_date: datetime) -> None:
     """Append an entry to the daily note synchronously using Jinja templates.
 
-    Ensures a blank line before ``---`` so Markdown treats it as a thematic
-    break / separator, not a Setext heading underline.
+    Ensures exactly one blank line before ``---`` (Setext-safe, no extra gaps).
     """
     note_path.parent.mkdir(parents=True, exist_ok=True)
     header = ""
+    prefix = ""
     if not note_path.exists():
         header = render_template("daily_header.md.j2", date=note_date.strftime("%Y-%m-%d"))
+    else:
+        existing = note_path.read_text(encoding="utf-8")
+        prefix = _blank_line_before_separator(existing)
     block = render_template(
         "block.md.j2",
         separator_ts=_separator_ts(note_date),
         entry=entry.strip(),
-    )
-    # Guarantees ``\\n\\n---`` even if a previous entry omitted a trailing blank line.
-    if note_path.exists():
-        existing = note_path.read_text(encoding="utf-8")
-        if existing and not existing.endswith("\n\n"):
-            if existing.endswith("\n"):
-                block = "\n" + block.lstrip("\n")
-            else:
-                block = "\n\n" + block.lstrip("\n")
+    ).lstrip("\n")
     with note_path.open("a", encoding="utf-8") as handle:
-        handle.write(f"{header}{block}")
+        handle.write(f"{header}{prefix}{block}")
 
 
 async def append_to_daily_note(
