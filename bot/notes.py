@@ -246,7 +246,11 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 
 def append_to_daily_note_sync(note_path: Path, entry: str, note_date: datetime) -> None:
-    """Append an entry to the daily note synchronously using Jinja templates."""
+    """Append an entry to the daily note synchronously using Jinja templates.
+
+    Ensures a blank line before ``---`` so Markdown treats it as a thematic
+    break / separator, not a Setext heading underline.
+    """
     note_path.parent.mkdir(parents=True, exist_ok=True)
     header = ""
     if not note_path.exists():
@@ -256,6 +260,14 @@ def append_to_daily_note_sync(note_path: Path, entry: str, note_date: datetime) 
         separator_ts=_separator_ts(note_date),
         entry=entry.strip(),
     )
+    # Guarantees ``\\n\\n---`` even if a previous entry omitted a trailing blank line.
+    if note_path.exists():
+        existing = note_path.read_text(encoding="utf-8")
+        if existing and not existing.endswith("\n\n"):
+            if existing.endswith("\n"):
+                block = "\n" + block.lstrip("\n")
+            else:
+                block = "\n\n" + block.lstrip("\n")
     with note_path.open("a", encoding="utf-8") as handle:
         handle.write(f"{header}{block}")
 
